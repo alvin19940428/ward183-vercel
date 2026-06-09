@@ -5,7 +5,8 @@ import {
   Package, LayoutList, FileText, X, Check, Clock, User, History, Calendar,
   BatteryFull, BatteryWarning, Wind, CheckSquare, Snowflake, 
   Stethoscope, Layers, Activity, Monitor, Move, AlertTriangle,
-  LogOut, Settings, DownloadCloud, Edit3, Printer, ClipboardList, PlusCircle, ImagePlus
+  LogOut, Settings, DownloadCloud, Edit3, Printer, ClipboardList, PlusCircle, ImagePlus,
+  BarChart3, Trophy, TrendingUp
 } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
@@ -206,6 +207,7 @@ export default function App() {
   const [historyDateFilter, setHistoryDateFilter] = useState('all');
   const [historyShiftFilter, setHistoryShiftFilter] = useState('all');
   const [historyStatusFilter, setHistoryStatusFilter] = useState('all');
+  const [statsMonth, setStatsMonth] = useState(getTodayDate().slice(0, 7));
 
   // --- Firebase 同步設定 (只同步紀錄與表單，不再同步密碼帳號) ---
   useEffect(() => {
@@ -234,6 +236,7 @@ export default function App() {
 
   // 本地快取
   useEffect(() => { localStorage.setItem('ward183_current_user', JSON.stringify(currentUser)); }, [currentUser]);
+  useEffect(() => { localStorage.setItem('ward183_local_users', JSON.stringify(users)); }, [users]);
   useEffect(() => { localStorage.setItem('ward183_staff_names', JSON.stringify(staffNames)); }, [staffNames]);
   useEffect(() => { localStorage.setItem('ward183_local_records', JSON.stringify(records)); }, [records]);
   useEffect(() => { localStorage.setItem('ward183_local_live', JSON.stringify(categories)); }, [categories]);
@@ -279,6 +282,11 @@ export default function App() {
     }
   };
 
+  useEffect(() => {
+    const matchedUser = users.find(u => u.name === authName.trim());
+    if (matchedUser?.avatar) setAuthAvatar(matchedUser.avatar);
+  }, [authName, users]);
+
   const handleCategoryChange = (catId) => {
     setActiveCategory(catId);
     requestAnimationFrame(() => {
@@ -287,9 +295,12 @@ export default function App() {
   };
 
   // --- 登入 (極簡：認名字與頭像) ---
-  const handleAuthDirectly = (name, avatar = authAvatar) => {
+  const handleAuthDirectly = (name, avatar = null) => {
     const trimmedName = name.trim();
     if (!trimmedName) return showToast('⚠️ 請輸入姓名');
+
+    const savedUser = users.find(u => u.name === trimmedName);
+    const finalAvatar = avatar || savedUser?.avatar || authAvatar || '👩‍⚕️';
     
     // 將名字加入常用清單 (最多存 10 個)
     if (!staffNames.includes(trimmedName)) {
@@ -297,11 +308,12 @@ export default function App() {
     }
 
     // 更新使用者名單 (紀錄選取的頭像)
-    updateSavedUserAvatar(trimmedName, avatar);
+    updateSavedUserAvatar(trimmedName, finalAvatar);
     
-    setCurrentUser({ name: trimmedName, avatar }); 
+    setCurrentUser({ name: trimmedName, avatar: finalAvatar }); 
     showToast(`👋 歡迎，${trimmedName} 護理師！`); 
     setAuthName('');
+    setAuthAvatar(finalAvatar);
   };
 
   const handleAuthSubmit = (e) => {
@@ -571,7 +583,7 @@ export default function App() {
       date: currentDate, shift: currentShift, staff: currentUser.name, staffAvatar: currentUser.avatar || '👩‍⚕️',
       timestamp: new Date().toISOString(), isBalanced: progress.balanced === progress.total, snapshot: categories,
       tasks: taskSnapshot, tasksCompleted: taskSnapshot.filter(t => t.done).length, tasksTotal: taskSnapshot.length,
-      abnormalities: abnormalSnapshot, abnormalCount: abnormalSnapshot.length, saveVersion: 'v10-line-summary'
+      abnormalities: abnormalSnapshot, abnormalCount: abnormalSnapshot.length, saveVersion: 'v11-monthly-stats'
     };
     try {
       if (targetRecordId && !forceNew) {
@@ -732,6 +744,114 @@ export default function App() {
   };
 
   const copyLineSummary = (record) => copyTextToClipboard(buildLineSummaryText(record));
+
+
+  const getRecordMonth = (record) => (record.date || '').slice(0, 7);
+
+  const statsMonthOptions = useMemo(() => {
+    const months = Array.from(new Set([getTodayDate().slice(0, 7), ...records.map(getRecordMonth).filter(Boolean)]));
+    return months.sort((a, b) => b.localeCompare(a));
+  }, [records]);
+
+  const classifyReason = (note = '') => {
+    const text = note.trim();
+    if (!text) return '未填寫原因';
+    if (text.includes('送消') || text.includes('消毒') || text.includes('清消')) return '送消／清消未回';
+    if (text.includes('床邊') || text.includes('使用') || text.includes('病人')) return '床邊使用中';
+    if (text.includes('借') || text.includes('外借') || text.includes('借出')) return '借出未歸還';
+    if (text.includes('維修') || text.includes('故障') || text.includes('壞')) return '維修／故障';
+    if (text.includes('遺失') || text.includes('不見') || text.includes('找不到')) return '遺失／找不到';
+    if (text.includes('公庫') || text.includes('未補') || text.includes('補充')) return '公庫未回補';
+    return text.length > 14 ? `${text.slice(0, 14)}…` : text;
+  };
+
+  const monthlyStats = useMemo(() => {
+    const monthRecords = records
+      .filter(record => getRecordMonth(record) === statsMonth)
+      .sort((a, b) => getRecordOrderKey(b.date, b.shift) - getRecordOrderKey(a.date, a.shift));
+
+    const itemMap = new Map();
+    const categoryMap = new Map();
+    const reasonMap = new Map();
+    const shiftMap = new Map();
+    const staffMap = new Map();
+
+    monthRecords.forEach(record => {
+      shiftMap.set(record.shift || '未填班別', (shiftMap.get(record.shift || '未填班別') || 0) + 1);
+      staffMap.set(record.staff || '未填姓名', (staffMap.get(record.staff || '未填姓名') || 0) + 1);
+
+      getRecordAbnormalItems(record).forEach(item => {
+        const itemKey = `${item.catName || ''}__${item.itemName || ''}`;
+        const currentItem = itemMap.get(itemKey) || {
+          name: item.itemName || '未命名物品', catName: item.catName || '未分類', count: 0, shortage: 0, overage: 0, notes: []
+        };
+        currentItem.count += 1;
+        if ((item.diff || 0) < 0) currentItem.shortage += Math.abs(item.diff || 0);
+        if ((item.diff || 0) > 0) currentItem.overage += Math.abs(item.diff || 0);
+        if (item.note?.trim()) currentItem.notes.push(item.note.trim());
+        itemMap.set(itemKey, currentItem);
+
+        const catName = item.catName || '未分類';
+        categoryMap.set(catName, (categoryMap.get(catName) || 0) + 1);
+
+        const reason = classifyReason(item.note || '');
+        reasonMap.set(reason, (reasonMap.get(reason) || 0) + 1);
+      });
+    });
+
+    const abnormalRecords = monthRecords.filter(record => !record.isBalanced).length;
+    const taskIncompleteRecords = monthRecords.filter(record => {
+      const total = record.tasksTotal ?? record.tasks?.length ?? 0;
+      const done = record.tasksCompleted ?? record.tasks?.filter(task => task.done).length ?? 0;
+      return total > 0 && done < total;
+    }).length;
+    const notesRecords = monthRecords.filter(record => {
+      const hasAbnormalNotes = record.abnormalities?.some(item => item.note?.trim()) || false;
+      const hasTaskNotes = record.tasks?.some(task => task.note?.trim()) || false;
+      return hasAbnormalNotes || hasTaskNotes;
+    }).length;
+
+    const toRanking = (map) => Array.from(map.entries())
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+
+    return {
+      monthRecords,
+      totalRecords: monthRecords.length,
+      abnormalRecords,
+      taskIncompleteRecords,
+      notesRecords,
+      abnormalRate: monthRecords.length ? Math.round((abnormalRecords / monthRecords.length) * 100) : 0,
+      taskIncompleteRate: monthRecords.length ? Math.round((taskIncompleteRecords / monthRecords.length) * 100) : 0,
+      itemRanking: Array.from(itemMap.values()).sort((a, b) => b.count - a.count || b.shortage - a.shortage).slice(0, 8),
+      categoryRanking: toRanking(categoryMap).slice(0, 6),
+      reasonRanking: toRanking(reasonMap).slice(0, 6),
+      shiftRanking: toRanking(shiftMap),
+      staffRanking: toRanking(staffMap).slice(0, 6),
+    };
+  }, [records, statsMonth]);
+
+  const copyMonthlyStatsSummary = () => {
+    const lines = [
+      `183病房 ${statsMonth} 月統計摘要`,
+      `點班紀錄：${monthlyStats.totalRecords} 筆`,
+      `異常紀錄：${monthlyStats.abnormalRecords} 筆（${monthlyStats.abnormalRate}%）`,
+      `常規未完成：${monthlyStats.taskIncompleteRecords} 筆（${monthlyStats.taskIncompleteRate}%）`,
+      '',
+      '最常異常物品：',
+      monthlyStats.itemRanking.length > 0
+        ? monthlyStats.itemRanking.slice(0, 5).map((item, idx) => `${idx + 1}. ${item.name}（${item.count} 次）`).join('\n')
+        : '無異常物品',
+      '',
+      '常見原因：',
+      monthlyStats.reasonRanking.length > 0
+        ? monthlyStats.reasonRanking.slice(0, 5).map((item, idx) => `${idx + 1}. ${item.name}（${item.count} 次）`).join('\n')
+        : '無異常原因紀錄',
+      '',
+      `產生時間：${new Date().toLocaleString('zh-TW')}`
+    ];
+    copyTextToClipboard(lines.join('\n'));
+  };
 
   // --- UI 元件：彈性計數按鈕 ---
   const CounterBtn = ({ label, value, icon: Icon, onDec, onInc, theme }) => {
@@ -1254,7 +1374,7 @@ export default function App() {
               <div className="flex justify-between items-start gap-3">
                 <div>
                   <h2 className="text-blue-800 font-bold flex items-center gap-2 text-sm"><History size={16}/> 歷史紀錄</h2>
-                  <p className="text-[10px] text-blue-600 mt-1">保存最新 100 筆紀錄，點選可產生圖檔報表。v10 交班摘要版</p>
+                  <p className="text-[10px] text-blue-600 mt-1">保存最新 100 筆紀錄，點選可產生圖檔報表。v11 月統計版</p>
                 </div>
                 <span className="bg-white text-blue-700 border border-blue-100 px-3 py-1 rounded-full text-xs font-black shrink-0">共 {filteredRecords.length} 筆</span>
               </div>
@@ -1356,6 +1476,134 @@ export default function App() {
           </div>
         )}
 
+        {/* ================= 模式 3：月統計 ================= */}
+        {activeTab === 'stats' && (
+          <div className="space-y-4 px-4 pt-4 animate-in fade-in duration-300">
+            <div className="bg-violet-50 border border-violet-200 p-4 rounded-xl">
+              <div className="flex justify-between items-start gap-3">
+                <div>
+                  <h2 className="text-violet-800 font-bold flex items-center gap-2 text-sm"><BarChart3 size={16}/> 月統計與異常排行榜</h2>
+                  <p className="text-[10px] text-violet-600 mt-1">依本機歷史紀錄統計，協助找出常見異常與追蹤重點。v11 月統計版</p>
+                </div>
+                <button onClick={copyMonthlyStatsSummary} className="bg-white text-violet-700 border border-violet-100 px-3 py-1.5 rounded-full text-xs font-black shrink-0 flex items-center gap-1 active:scale-95">
+                  <ClipboardList size={12}/> 複製
+                </button>
+              </div>
+              <div className="mt-3">
+                <label className="text-[10px] font-bold text-violet-700 block mb-1">統計月份</label>
+                <select value={statsMonth} onChange={e => setStatsMonth(e.target.value)} className="w-full bg-white border border-violet-200 rounded-xl px-3 py-2 text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-violet-300">
+                  {statsMonthOptions.map(month => <option key={month} value={month}>{month}</option>)}
+                </select>
+              </div>
+            </div>
+
+            {monthlyStats.totalRecords === 0 ? (
+              <div className="text-center py-10 text-slate-400 text-sm font-bold bg-white rounded-2xl border border-slate-200 shadow-sm">這個月份目前沒有點班紀錄</div>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
+                    <div className="text-[11px] text-slate-400 font-bold mb-1">本月紀錄</div>
+                    <div className="text-2xl font-black text-slate-800">{monthlyStats.totalRecords}</div>
+                    <div className="text-[10px] text-slate-400 mt-1">筆點班紀錄</div>
+                  </div>
+                  <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
+                    <div className="text-[11px] text-slate-400 font-bold mb-1">異常紀錄</div>
+                    <div className={`text-2xl font-black ${monthlyStats.abnormalRecords > 0 ? 'text-rose-600' : 'text-emerald-600'}`}>{monthlyStats.abnormalRecords}</div>
+                    <div className="text-[10px] text-slate-400 mt-1">異常率 {monthlyStats.abnormalRate}%</div>
+                  </div>
+                  <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
+                    <div className="text-[11px] text-slate-400 font-bold mb-1">常規未完成</div>
+                    <div className={`text-2xl font-black ${monthlyStats.taskIncompleteRecords > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>{monthlyStats.taskIncompleteRecords}</div>
+                    <div className="text-[10px] text-slate-400 mt-1">未完成率 {monthlyStats.taskIncompleteRate}%</div>
+                  </div>
+                  <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
+                    <div className="text-[11px] text-slate-400 font-bold mb-1">有備註紀錄</div>
+                    <div className="text-2xl font-black text-indigo-600">{monthlyStats.notesRecords}</div>
+                    <div className="text-[10px] text-slate-400 mt-1">含異常或常規原因</div>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-sm font-black text-slate-800 flex items-center gap-2"><Trophy size={16} className="text-amber-500"/> 最常異常物品</h3>
+                    <span className="text-[10px] text-slate-400 font-bold">Top {Math.min(8, monthlyStats.itemRanking.length)}</span>
+                  </div>
+                  {monthlyStats.itemRanking.length === 0 ? (
+                    <div className="text-center py-6 text-slate-400 text-xs font-bold bg-slate-50 rounded-xl">本月沒有異常物品</div>
+                  ) : (
+                    <div className="space-y-2.5">
+                      {monthlyStats.itemRanking.map((item, idx) => {
+                        const max = Math.max(...monthlyStats.itemRanking.map(i => i.count), 1);
+                        return (
+                          <div key={`${item.catName}-${item.name}`} className="space-y-1">
+                            <div className="flex justify-between gap-2 text-xs">
+                              <div className="min-w-0 font-bold text-slate-700 truncate"><span className="text-amber-600 mr-1">#{idx + 1}</span>{item.name}<span className="text-slate-400 font-medium ml-1">{item.catName}</span></div>
+                              <div className="font-black text-rose-600 shrink-0">{item.count} 次</div>
+                            </div>
+                            <div className="h-2 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-rose-400 rounded-full" style={{ width: `${Math.max(10, Math.round((item.count / max) * 100))}%` }} /></div>
+                            <div className="text-[10px] text-slate-400 font-medium">少 {item.shortage}、多 {item.overage}{item.notes?.[0] ? `｜${item.notes[0]}` : ''}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
+                  <h3 className="text-sm font-black text-slate-800 flex items-center gap-2 mb-3"><TrendingUp size={16} className="text-indigo-500"/> 常見異常原因</h3>
+                  {monthlyStats.reasonRanking.length === 0 ? (
+                    <div className="text-center py-6 text-slate-400 text-xs font-bold bg-slate-50 rounded-xl">本月沒有異常原因紀錄</div>
+                  ) : (
+                    <div className="space-y-2">
+                      {monthlyStats.reasonRanking.map((item, idx) => {
+                        const max = Math.max(...monthlyStats.reasonRanking.map(i => i.count), 1);
+                        return (
+                          <div key={item.name} className="flex items-center gap-2">
+                            <div className="w-6 h-6 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center text-[10px] font-black shrink-0">{idx + 1}</div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex justify-between text-xs font-bold text-slate-700"><span className="truncate">{item.name}</span><span className="text-indigo-600 shrink-0 ml-2">{item.count} 次</span></div>
+                              <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden mt-1"><div className="h-full bg-indigo-400 rounded-full" style={{ width: `${Math.max(10, Math.round((item.count / max) * 100))}%` }} /></div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 gap-4">
+                  <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
+                    <h3 className="text-sm font-black text-slate-800 flex items-center gap-2 mb-3"><Package size={16} className="text-emerald-500"/> 異常區域分布</h3>
+                    {monthlyStats.categoryRanking.length === 0 ? <div className="text-center py-5 text-slate-400 text-xs font-bold bg-slate-50 rounded-xl">本月無異常區域</div> : (
+                      <div className="flex flex-wrap gap-2">
+                        {monthlyStats.categoryRanking.map(item => <span key={item.name} className="bg-emerald-50 text-emerald-700 border border-emerald-100 px-3 py-1.5 rounded-full text-xs font-bold">{item.name} {item.count}</span>)}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm">
+                    <h3 className="text-sm font-black text-slate-800 flex items-center gap-2 mb-3"><Clock size={16} className="text-blue-500"/> 班別紀錄分布</h3>
+                    <div className="flex flex-wrap gap-2">
+                      {['白班', '小夜', '大夜'].map(shift => {
+                        const found = monthlyStats.shiftRanking.find(item => item.name === shift);
+                        return <span key={shift} className="bg-blue-50 text-blue-700 border border-blue-100 px-3 py-1.5 rounded-full text-xs font-bold">{shift} {found?.count || 0}</span>;
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4">
+                  <h3 className="text-sm font-black text-slate-700 flex items-center gap-2 mb-2"><User size={16} className="text-slate-500"/> 本月點班人員</h3>
+                  <div className="flex flex-wrap gap-2">
+                    {monthlyStats.staffRanking.map(item => <span key={item.name} className="bg-white text-slate-600 border border-slate-200 px-3 py-1.5 rounded-full text-xs font-bold">{item.name} {item.count} 筆</span>)}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
         {/* ================= 模式 3：設定 ================= */}
         {activeTab === 'edit' && (
           <div className="space-y-4 px-4 pt-4 animate-in fade-in duration-300">
@@ -1427,6 +1675,10 @@ export default function App() {
           <button onClick={() => setActiveTab('history')} className={`flex flex-col items-center gap-1 p-2 transition-colors select-none ${activeTab === 'history' ? 'text-indigo-600' : 'text-slate-400'}`}>
              <div className={`p-1.5 rounded-lg ${activeTab === 'history' ? 'bg-indigo-50' : 'bg-transparent'}`}><History size={24} strokeWidth={activeTab === 'history' ? 2.5 : 2} /></div>
             <span className="text-[10px] font-bold">紀錄</span>
+          </button>
+          <button onClick={() => setActiveTab('stats')} className={`flex flex-col items-center gap-1 p-2 transition-colors select-none ${activeTab === 'stats' ? 'text-indigo-600' : 'text-slate-400'}`}>
+             <div className={`p-1.5 rounded-xl ${activeTab === 'stats' ? 'bg-indigo-50' : 'bg-transparent'}`}><BarChart3 size={24} strokeWidth={activeTab === 'stats' ? 2.5 : 2} /></div>
+            <span className="text-[10px] font-bold">統計</span>
           </button>
           <button onClick={() => setActiveTab('edit')} className={`flex flex-col items-center gap-1 p-2 transition-colors select-none ${activeTab === 'edit' ? 'text-indigo-600' : 'text-slate-400'}`}>
              <div className={`p-1.5 rounded-xl ${activeTab === 'edit' ? 'bg-indigo-50' : 'bg-transparent'}`}><Settings size={24} strokeWidth={activeTab === 'edit' ? 2.5 : 2} /></div>
