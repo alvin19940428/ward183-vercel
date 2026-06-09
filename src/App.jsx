@@ -202,6 +202,9 @@ export default function App() {
   const [saveReview, setSaveReview] = useState(null);
   const [abnormalNotes, setAbnormalNotes] = useState({});
   const [taskNotes, setTaskNotes] = useState({});
+  const [historyDateFilter, setHistoryDateFilter] = useState('all');
+  const [historyShiftFilter, setHistoryShiftFilter] = useState('all');
+  const [historyStatusFilter, setHistoryStatusFilter] = useState('all');
 
   // --- Firebase 同步設定 (只同步紀錄與表單，不再同步密碼帳號) ---
   useEffect(() => {
@@ -390,6 +393,63 @@ export default function App() {
   const taskTotalCount = activeShiftTasks.length;
   const allTasksCompleted = taskTotalCount === 0 || taskDoneCount === taskTotalCount;
 
+  const getLocalDateString = (date) => {
+    const tzOffset = date.getTimezoneOffset() * 60000;
+    return new Date(date.getTime() - tzOffset).toISOString().split('T')[0];
+  };
+
+  const getDateWithOffset = (days) => {
+    const date = new Date();
+    date.setDate(date.getDate() + days);
+    return getLocalDateString(date);
+  };
+
+  const getWeekStartDate = () => {
+    const date = new Date();
+    const day = date.getDay();
+    const mondayOffset = day === 0 ? -6 : 1 - day;
+    date.setDate(date.getDate() + mondayOffset);
+    return getLocalDateString(date);
+  };
+
+  const filteredRecords = useMemo(() => {
+    const today = getDateWithOffset(0);
+    const yesterday = getDateWithOffset(-1);
+    const weekStart = getWeekStartDate();
+
+    return records.filter(record => {
+      const recordDate = record.date || '';
+      const recordShift = record.shift || '';
+      const taskTotal = record.tasksTotal ?? record.tasks?.length ?? 0;
+      const taskDone = record.tasksCompleted ?? record.tasks?.filter(t => t.done).length ?? 0;
+      const hasAbnormalNotes = record.abnormalities?.some(item => item.note?.trim()) || false;
+      const hasTaskNotes = record.tasks?.some(task => task.note?.trim()) || false;
+
+      const matchDate =
+        historyDateFilter === 'all' ||
+        (historyDateFilter === 'today' && recordDate === today) ||
+        (historyDateFilter === 'yesterday' && recordDate === yesterday) ||
+        (historyDateFilter === 'week' && recordDate >= weekStart && recordDate <= today);
+
+      const matchShift = historyShiftFilter === 'all' || recordShift === historyShiftFilter;
+
+      const matchStatus =
+        historyStatusFilter === 'all' ||
+        (historyStatusFilter === 'balanced' && record.isBalanced) ||
+        (historyStatusFilter === 'abnormal' && !record.isBalanced) ||
+        (historyStatusFilter === 'task_incomplete' && taskTotal > 0 && taskDone < taskTotal) ||
+        (historyStatusFilter === 'notes' && (hasAbnormalNotes || hasTaskNotes));
+
+      return matchDate && matchShift && matchStatus;
+    });
+  }, [records, historyDateFilter, historyShiftFilter, historyStatusFilter]);
+
+  const resetHistoryFilters = () => {
+    setHistoryDateFilter('all');
+    setHistoryShiftFilter('all');
+    setHistoryStatusFilter('all');
+  };
+
   const getItemKey = (catId, itemId) => `${catId}__${itemId}`;
 
   const getAbnormalItems = () => {
@@ -441,7 +501,7 @@ export default function App() {
       date: currentDate, shift: currentShift, staff: currentUser.name, staffAvatar: currentUser.avatar || '👩‍⚕️',
       timestamp: new Date().toISOString(), isBalanced: progress.balanced === progress.total, snapshot: categories,
       tasks: taskSnapshot, tasksCompleted: taskSnapshot.filter(t => t.done).length, tasksTotal: taskSnapshot.length,
-      abnormalities: abnormalSnapshot, abnormalCount: abnormalSnapshot.length, saveVersion: 'v7-safety-notes'
+      abnormalities: abnormalSnapshot, abnormalCount: abnormalSnapshot.length, saveVersion: 'v8-history-filters'
     };
     try {
       if (targetRecordId && !forceNew) {
@@ -985,17 +1045,65 @@ export default function App() {
         {/* ================= 模式 2：歷史紀錄 ================= */}
         {activeTab === 'history' && (
           <div className="space-y-4 px-4 pt-4 animate-in fade-in duration-300">
-            <div className="bg-blue-50 border border-blue-200 p-4 rounded-xl flex justify-between items-center">
-              <div>
-                <h2 className="text-blue-800 font-bold flex items-center gap-2 text-sm"><History size={16}/> 歷史紀錄</h2>
-                <p className="text-[10px] text-blue-600 mt-1">保存最新 100 筆紀錄，點選可產生圖檔報表。v7 防重複＋備註版</p>
+            <div className="bg-blue-50 border border-blue-200 p-4 rounded-xl">
+              <div className="flex justify-between items-start gap-3">
+                <div>
+                  <h2 className="text-blue-800 font-bold flex items-center gap-2 text-sm"><History size={16}/> 歷史紀錄</h2>
+                  <p className="text-[10px] text-blue-600 mt-1">保存最新 100 筆紀錄，點選可產生圖檔報表。v8 篩選版</p>
+                </div>
+                <span className="bg-white text-blue-700 border border-blue-100 px-3 py-1 rounded-full text-xs font-black shrink-0">共 {filteredRecords.length} 筆</span>
               </div>
             </div>
+
+            <div className="bg-white rounded-2xl p-3 shadow-sm border border-slate-200 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-xs font-black text-slate-700 flex items-center gap-1"><History size={14} className="text-indigo-500"/> 紀錄篩選</div>
+                {(historyDateFilter !== 'all' || historyShiftFilter !== 'all' || historyStatusFilter !== 'all') && (
+                  <button onClick={resetHistoryFilters} className="text-[11px] font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded-lg">清除</button>
+                )}
+              </div>
+
+              <div>
+                <div className="text-[10px] font-bold text-slate-400 mb-1">日期</div>
+                <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
+                  {[
+                    ['all', '全部'], ['today', '今天'], ['yesterday', '昨天'], ['week', '本週']
+                  ].map(([value, label]) => (
+                    <button key={value} onClick={() => setHistoryDateFilter(value)} className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-bold border transition-colors ${historyDateFilter === value ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-slate-50 text-slate-600 border-slate-200'}`}>{label}</button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-[10px] font-bold text-slate-400 mb-1">班別</div>
+                <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
+                  {[
+                    ['all', '全部'], ['白班', '白班'], ['小夜', '小夜'], ['大夜', '大夜']
+                  ].map(([value, label]) => (
+                    <button key={value} onClick={() => setHistoryShiftFilter(value)} className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-bold border transition-colors ${historyShiftFilter === value ? 'bg-slate-800 text-white border-slate-800' : 'bg-slate-50 text-slate-600 border-slate-200'}`}>{label}</button>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-[10px] font-bold text-slate-400 mb-1">狀態</div>
+                <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
+                  {[
+                    ['all', '全部'], ['balanced', '只看平帳'], ['abnormal', '只看異常'], ['task_incomplete', '常規未完成'], ['notes', '有備註']
+                  ].map(([value, label]) => (
+                    <button key={value} onClick={() => setHistoryStatusFilter(value)} className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-bold border transition-colors ${historyStatusFilter === value ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-slate-50 text-slate-600 border-slate-200'}`}>{label}</button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
             {records.length === 0 ? (
               <div className="text-center py-10 text-slate-400 text-sm font-bold">目前沒有紀錄。</div>
+            ) : filteredRecords.length === 0 ? (
+              <div className="text-center py-10 text-slate-400 text-sm font-bold bg-white rounded-2xl border border-slate-200 shadow-sm">目前沒有符合篩選條件的紀錄</div>
             ) : (
               <div className="space-y-3 pb-6">
-                {records.map(record => {
+                {filteredRecords.map(record => {
                   const recordTaskTotal = record.tasksTotal ?? record.tasks?.length ?? 0;
                   const recordTaskDone = record.tasksCompleted ?? record.tasks?.filter(t => t.done).length ?? 0;
                   const canManageRecord = record.staff === currentUser.name;
