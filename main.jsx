@@ -1,0 +1,949 @@
+import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { 
+  CheckCircle2, AlertCircle, Plus, Minus, Trash2, 
+  Save, Bed, ShieldPlus, Wrench, AlertOctagon, 
+  Package, LayoutList, FileText, X, Check, Clock, User, History, Calendar,
+  BatteryFull, BatteryWarning, Wind, CheckSquare, Snowflake, 
+  Stethoscope, Layers, Activity, Monitor, Move, AlertTriangle,
+  LogOut, Settings, DownloadCloud, Edit3, Printer, ClipboardList, PlusCircle, ImagePlus
+} from 'lucide-react';
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
+
+// --- 初始表單資料 (已將冰箱區移至最後) ---
+const initialData = [
+  { id: 'med_prep', name: '備藥間', items: [
+      { id: 'm1', name: 'CD碗', standard: 6, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [], hideRepair: true },
+      { id: 'm2', name: '無菌鑷', standard: 5, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [], hideRepair: true },
+      { id: 'm3', name: '直鈍剪', standard: 1, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [], hideRepair: true },
+      { id: 'm4', name: '拔釘器', standard: 4, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [], hideRepair: true },
+      { id: 'm5', name: '拆線剪', standard: 2, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [], hideRepair: true },
+      { id: 'm6', name: 'Kelly', standard: 2, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [], hideRepair: true },
+      { id: 'm7', name: '繃帶剪', standard: 3, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [], hideRepair: true },
+      { id: 'm8', name: '縫合包', standard: 1, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [], hideRepair: true },
+      { id: 'm9', name: '止血鉗', standard: 1, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [], hideRepair: true },
+      { id: 'm10', name: '敷料罐', standard: 8, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [], hideRepair: true },
+      { id: 'm11', name: 'Doppler', standard: 1, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [], hideDisinfect: true },
+  ]},
+  { id: 'treatment', name: '治療間', items: [
+      { id: 't1', name: 'Suction(含急救車)', standard: 10, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [] },
+      { id: 't2', name: '胃減壓器', standard: 2, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [] },
+      { id: 't3', name: 'E.S.', standard: 1, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [] },
+      { id: 't4', name: '胸瓶架', standard: 5, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [] },
+      { id: 't5', name: '深彎', standard: 2, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [], hideRepair: true },
+  ]},
+  { id: 'station', name: '護理站', items: [
+      { id: 's1', name: '公務手機', standard: 7, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [], hideDisinfect: true },
+      { id: 's2', name: '平板+筆', standard: 5, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [], hideDisinfect: true },
+      { id: 's3', name: '耳溫槍', standard: 8, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [], hideDisinfect: true },
+      { id: 's4', name: '直立血壓機', standard: 8, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [], hideDisinfect: true },
+      { id: 's5', name: '手持歐姆龍', standard: 4, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [], hideDisinfect: true },
+      { id: 's6', name: '攜帶式血氧機', standard: 3, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [], hideDisinfect: true },
+  ]},
+  { id: 'linen', name: '被服間', items: [
+      { id: 'l1', name: '脂肪墊 大', standard: 1, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [], hideRepair: true },
+      { id: 'l2', name: '脂肪墊 小', standard: 1, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [], hideRepair: true },
+      { id: 'l3', name: '翻身枕', standard: 2, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [], hideRepair: true },
+      { id: 'l4', name: '胸約束含扣', standard: 1, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [], hideRepair: true },
+      { id: 'l5', name: '拍痰器', standard: 2, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [] },
+      { id: 'l6', name: '小氧桶', standard: 1, publicCount: 0, fullCount: 0, emptyCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [], hideDisinfect: true, hideRepair: true, hasFullEmpty: true },
+  ]},
+  { id: 'equipment', name: '儀器間', items: [
+      { id: 'e1', name: '腳踏器', standard: 6, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [] },
+      { id: 'e2', name: '膝CPM', standard: 6, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [] },
+      { id: 'e3', name: 'IV幫浦+架', standard: 1, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [] },
+      { id: 'e4', name: '紅外線烤燈', standard: 1, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [] },
+      { id: 'e5', name: '床磅', standard: 1, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [] },
+  ]},
+  { id: 'periphery', name: '外圍', items: [
+      { id: 'p1', name: '6號骨科輪椅', standard: 4, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [], hideDisinfect: true },
+      { id: 'p2', name: '紫輪椅', standard: 3, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [], hideDisinfect: true },
+      { id: 'p3', name: '高背輪椅', standard: 1, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [], hideDisinfect: true },
+  ]},
+  { id: 'fridge', name: '冰箱區', items: [
+      { id: 'f1', name: '大冰枕', standard: 1, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [], hideDisinfect: true, hideRepair: true },
+      { id: 'f2', name: '小冰枕', standard: 9, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [], hideDisinfect: true, hideRepair: true },
+  ]}
+];
+
+const shiftTasksConfig = {
+  '白班': [
+    { id: 'task4', label: '填寫「責任區安全檢查紀錄表」' },
+    { id: 'task1', label: '與大夜班交班，完成管制藥品管理系統' },
+    { id: 'task2', label: '急救車、Dormicum常備量點班' },
+    { id: 'task3', label: '電擊器測試' },
+    { id: 'task5', label: '點選線上一級保養系統' },
+  ],
+  '小夜': [], '大夜': []
+};
+
+const CategoryIcon = ({ id, size = 16, className = "" }) => {
+  switch(id) {
+    case 'med_prep': return <Package size={size} className={className} />;
+    case 'treatment': return <Activity size={size} className={className} />;
+    case 'station': return <FileText size={size} className={className} />;
+    case 'linen': return <Layers size={size} className={className} />;
+    case 'fridge': return <Snowflake size={size} className={className} />;
+    case 'equipment': return <Monitor size={size} className={className} />;
+    case 'periphery': return <Move size={size} className={className} />;
+    default: return <Package size={size} className={className} />;
+  }
+};
+
+
+const AvatarView = ({ avatar, className = "", imgClassName = "w-full h-full object-cover" }) => {
+  const isImageAvatar = typeof avatar === 'string' && avatar.startsWith('data:image');
+  return (
+    <div className={`${className} overflow-hidden`}>
+      {isImageAvatar ? <img src={avatar} alt="使用者頭像" className={imgClassName} /> : <span>{avatar || '👩‍⚕️'}</span>}
+    </div>
+  );
+};
+
+const createAvatarDataUrl = (file) => new Promise((resolve, reject) => {
+  if (!file) return reject(new Error('No file selected'));
+  if (!file.type?.startsWith('image/')) return reject(new Error('請選擇圖片檔'));
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      const size = 160;
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, size, size);
+      const scale = Math.max(size / img.width, size / img.height);
+      const width = img.width * scale;
+      const height = img.height * scale;
+      const x = (size - width) / 2;
+      const y = (size - height) / 2;
+      ctx.drawImage(img, x, y, width, height);
+      resolve(canvas.toDataURL('image/jpeg', 0.74));
+    };
+    img.onerror = () => reject(new Error('圖片讀取失敗'));
+    img.src = reader.result;
+  };
+  reader.onerror = () => reject(new Error('圖片讀取失敗'));
+  reader.readAsDataURL(file);
+});
+
+const getAutoShift = () => {
+  const hour = new Date().getHours();
+  if (hour >= 0 && hour < 8) return '大夜';
+  if (hour >= 8 && hour < 16) return '白班';
+  return '小夜';
+};
+
+const getTodayDate = () => {
+  const tzOffset = (new Date()).getTimezoneOffset() * 60000;
+  return (new Date(Date.now() - tzOffset)).toISOString().split('T')[0];
+};
+
+// --- Firebase initialization for Vercel / Vite ---
+let app, auth, db, appId;
+let isFirebaseEnabled = false;
+try {
+  const firebaseConfig = {
+    apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+    appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  };
+
+  const hasFirebaseConfig = Object.values(firebaseConfig).every(Boolean);
+
+  if (hasFirebaseConfig) {
+    app = initializeApp(firebaseConfig);
+    auth = getAuth(app);
+    db = getFirestore(app);
+    appId = import.meta.env.VITE_APP_ID || 'ward-183';
+    isFirebaseEnabled = true;
+  }
+} catch (e) {
+  console.warn("Firebase init error, using local fallback.", e);
+}
+
+export default function App() {
+  // 系統狀態
+  const [fbUser, setFbUser] = useState(null);
+  const [users, setUsers] = useState(() => { try { return JSON.parse(localStorage.getItem('ward183_local_users')) || []; } catch { return []; } });
+  const [records, setRecords] = useState(() => { try { return JSON.parse(localStorage.getItem('ward183_local_records')) || []; } catch { return []; } });
+  const [categories, setCategories] = useState(() => { try { return JSON.parse(localStorage.getItem('ward183_local_live')) || initialData; } catch { return initialData; } });
+  
+  // 帳號狀態 (極簡版)
+  const [currentUser, setCurrentUser] = useState(() => { try { return JSON.parse(localStorage.getItem('ward183_current_user')) || null; } catch { return null; } });
+  const [staffNames, setStaffNames] = useState(() => { try { return JSON.parse(localStorage.getItem('ward183_staff_names')) || []; } catch { return []; } });
+  const [authName, setAuthName] = useState('');
+  const [authAvatar, setAuthAvatar] = useState('👩‍⚕️'); // 新增頭像狀態
+  
+  // 操作狀態
+  const [tasksDone, setTasksDone] = useState({});
+  const [activeTab, setActiveTab] = useState('handover'); 
+  const [activeCategory, setActiveCategory] = useState('med_prep'); 
+  const [bedInputs, setBedInputs] = useState({}); 
+  const [editingRecordId, setEditingRecordId] = useState(null); 
+  const [viewingSummary, setViewingSummary] = useState(null); 
+  
+  const [currentDate, setCurrentDate] = useState(getTodayDate());
+  const [currentShift, setCurrentShift] = useState(getAutoShift());
+  const itemListRef = useRef(null);
+  const taskListRef = useRef(null);
+  const tasksStorageKey = `ward183_tasks_${currentDate}_${currentShift}`;
+
+  // 提示狀態
+  const [toastMsg, setToastMsg] = useState(null);
+  const [confirmDialog, setConfirmDialog] = useState(null);
+
+  // --- Firebase 同步設定 (只同步紀錄與表單，不再同步密碼帳號) ---
+  useEffect(() => {
+    if (!isFirebaseEnabled) return;
+    const initAuth = async () => {
+      try {
+        await signInAnonymously(auth);
+      } catch (e) {
+        console.error("Auth error", e);
+      }
+    };
+    initAuth();
+    const unsub = onAuthStateChanged(auth, user => setFbUser(user));
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
+    if (!isFirebaseEnabled || !fbUser) return;
+    const unsubRecords = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'records'), snap => {
+      const recs = snap.docs.map(d => ({ fbId: d.id, ...d.data() }));
+      recs.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+      setRecords(recs);
+    }, err => console.log(err));
+    return () => { unsubRecords(); };
+  }, [fbUser]);
+
+  // 本地快取
+  useEffect(() => { localStorage.setItem('ward183_current_user', JSON.stringify(currentUser)); }, [currentUser]);
+  useEffect(() => { localStorage.setItem('ward183_staff_names', JSON.stringify(staffNames)); }, [staffNames]);
+  useEffect(() => { localStorage.setItem('ward183_local_records', JSON.stringify(records)); }, [records]);
+  useEffect(() => { localStorage.setItem('ward183_local_live', JSON.stringify(categories)); }, [categories]);
+  useEffect(() => { try { setTasksDone(JSON.parse(localStorage.getItem(tasksStorageKey)) || {}); } catch { setTasksDone({}); } }, [tasksStorageKey]);
+  useEffect(() => { localStorage.setItem(tasksStorageKey, JSON.stringify(tasksDone)); }, [tasksDone, tasksStorageKey]);
+
+  const showToast = (msg) => { setToastMsg(msg); setTimeout(() => setToastMsg(null), 3000); };
+  const showConfirm = (title, message, onConfirm) => { setConfirmDialog({ title, message, onConfirm }); };
+
+  const updateSavedUserAvatar = (name, avatar) => {
+    setUsers(prev => {
+      const exists = prev.some(u => u.name === name);
+      if (exists) return prev.map(u => u.name === name ? { ...u, avatar } : u);
+      return [...prev, { name, avatar }];
+    });
+  };
+
+  const updateCurrentAvatar = (avatar) => {
+    if (!currentUser?.name) return;
+    setCurrentUser(prev => ({ ...prev, avatar }));
+    updateSavedUserAvatar(currentUser.name, avatar);
+    showToast('✅ 頭像已更新');
+  };
+
+  const handleAvatarFile = async (file, applyAvatar) => {
+    if (!file) return;
+    try {
+      const avatarDataUrl = await createAvatarDataUrl(file);
+      applyAvatar(avatarDataUrl);
+      showToast('✅ 已設定照片頭像');
+    } catch (e) {
+      console.error(e);
+      showToast('❌ 圖片讀取失敗，請換一張照片');
+    }
+  };
+
+  const handleCategoryChange = (catId) => {
+    setActiveCategory(catId);
+    requestAnimationFrame(() => {
+      itemListRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  };
+
+  // --- 登入 (極簡：認名字與頭像) ---
+  const handleAuthDirectly = (name, avatar = authAvatar) => {
+    const trimmedName = name.trim();
+    if (!trimmedName) return showToast('⚠️ 請輸入姓名');
+    
+    // 將名字加入常用清單 (最多存 10 個)
+    if (!staffNames.includes(trimmedName)) {
+      setStaffNames(prev => [trimmedName, ...prev].slice(0, 10));
+    }
+
+    // 更新使用者名單 (紀錄選取的頭像)
+    updateSavedUserAvatar(trimmedName, avatar);
+    
+    setCurrentUser({ name: trimmedName, avatar }); 
+    showToast(`👋 歡迎，${trimmedName} 護理師！`); 
+    setAuthName('');
+  };
+
+  const handleAuthSubmit = (e) => {
+    e.preventDefault();
+    handleAuthDirectly(authName);
+  };
+
+  const handleLogout = () => {
+    showConfirm('登出', '確定要登出切換使用者嗎？', () => { setCurrentUser(null); setEditingRecordId(null); showToast('👋 已登出'); });
+  };
+
+  // --- 點班計數與床位邏輯 ---
+  const updateCountByDelta = (catId, itemId, field, delta) => {
+    setCategories(prev => prev.map(cat => {
+      if (cat.id !== catId) return cat;
+      return {
+        ...cat, items: cat.items.map(item => {
+          if (item.id !== itemId) return item;
+          return { ...item, [field]: Math.max(0, (item[field] || 0) + delta) };
+        })
+      };
+    }));
+  };
+
+  const addBed = (catId, itemId, bedStr) => {
+    if (!bedStr || !bedStr.trim()) return;
+    const newBeds = bedStr.split(/[\s,，、。]+/).filter(b => b.trim() !== '');
+    setCategories(prev => prev.map(cat => cat.id === catId ? {
+      ...cat, items: cat.items.map(item => item.id === itemId ? { ...item, beds: [...(item.beds || []), ...newBeds] } : item)
+    } : cat));
+  };
+
+  const removeBed = (catId, itemId, indexToRemove) => {
+    setCategories(prev => prev.map(cat => cat.id === catId ? {
+      ...cat, items: cat.items.map(item => item.id === itemId ? { ...item, beds: (item.beds || []).filter((_, idx) => idx !== indexToRemove) } : item)
+    } : cat));
+  };
+
+  // --- 全自動繼承床位邏輯 ---
+  const resetAllAndInherit = () => {
+    showConfirm('全部歸零', '確定要清空目前進度重新點班嗎？\n(系統將自動為您帶入上一班的床位紀錄)', () => {
+      // 保持目前的表單設定架構 (standard 數量等)，只清空計數
+      let newCats = categories.map(cat => ({ 
+        ...cat, items: cat.items.map(item => ({ ...item, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, fullCount: 0, emptyCount: 0, beds: [] })) 
+      }));
+      
+      // 自動繼承上一筆紀錄的床位
+      if (records.length > 0) {
+        const lastSnapshot = records[0].snapshot || [];
+        newCats = newCats.map(cat => ({
+          ...cat, items: cat.items.map(item => {
+            const pastBeds = lastSnapshot.find(c => c.id === cat.id)?.items.find(i => i.id === item.id)?.beds || [];
+            return { ...item, beds: pastBeds };
+          })
+        }));
+      }
+
+      setCategories(newCats); setBedInputs({}); setTasksDone({}); setEditingRecordId(null);
+      setCurrentDate(getTodayDate()); setCurrentShift(getAutoShift());
+      showToast('✅ 畫面已清空，並自動帶入上一班床位！');
+    });
+  };
+
+  // --- 編輯表單設定項目 ---
+  const updateItemConfig = (catId, itemId, field, value) => {
+    setCategories(prev => prev?.map(cat => (cat.id === catId ? { ...cat, items: cat.items?.map(item => (item.id === itemId ? { ...item, [field]: field === 'standard' ? Math.max(0, parseInt(value) || 0) : value } : item)) } : cat)));
+  };
+  const deleteItem = (catId, itemId) => {
+    showConfirm('刪除項目', '確定要刪除此項目嗎？', () => {
+      setCategories(prev => prev?.map(cat => (cat.id === catId ? { ...cat, items: cat.items?.filter(i => i.id !== itemId) } : cat))); showToast('🗑️ 已刪除');
+    });
+  };
+  const addItem = (catId) => {
+    setCategories(prev => prev?.map(cat => (cat.id === catId ? { ...cat, items: [...(cat.items || []), { id: 'c_'+Date.now(), name: '新項目', standard: 1, publicCount: 0, disinfectCount:0, repairCount:0, missingCount:0, fullCount:0, emptyCount:0, beds:[] }] } : cat)));
+  };
+
+  // --- 計算與儲存 ---
+  const getTotal = (item) => (item.publicCount || 0) + (item.disinfectCount || 0) + (item.repairCount || 0) + (item.missingCount || 0) + (item.beds?.length || 0);
+  
+  const progress = useMemo(() => {
+    let totalItems = 0, balancedItems = 0;
+    categories?.forEach(cat => cat.items?.forEach(item => {
+      totalItems++; if (getTotal(item) === item.standard) balancedItems++;
+    }));
+    return { total: totalItems, balanced: balancedItems };
+  }, [categories]);
+
+  const activeShiftTasks = shiftTasksConfig[currentShift] || [];
+  const taskDoneCount = activeShiftTasks.filter(t => tasksDone[t.id]).length;
+  const taskTotalCount = activeShiftTasks.length;
+  const allTasksCompleted = taskTotalCount === 0 || taskDoneCount === taskTotalCount;
+
+  const executeSaveRecord = async () => {
+    const taskSnapshot = activeShiftTasks.map(task => ({ ...task, done: !!tasksDone[task.id] }));
+    const recordData = {
+      date: currentDate, shift: currentShift, staff: currentUser.name, staffAvatar: currentUser.avatar || '👩‍⚕️',
+      timestamp: new Date().toISOString(), isBalanced: progress.balanced === progress.total, snapshot: categories,
+      tasks: taskSnapshot, tasksCompleted: taskSnapshot.filter(t => t.done).length, tasksTotal: taskSnapshot.length
+    };
+    try {
+      if (editingRecordId) {
+        if (isFirebaseEnabled && fbUser) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'records', editingRecordId), recordData);
+        else setRecords(prev => prev.map(r => r.fbId === editingRecordId ? { ...recordData, fbId: r.fbId } : r));
+        showToast('✅ 紀錄已成功更新！'); setEditingRecordId(null);
+      } else {
+        const newId = Date.now().toString();
+        if (isFirebaseEnabled && fbUser) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'records', newId), recordData);
+        else setRecords(prev => [{ ...recordData, fbId: newId }, ...prev].slice(0, 100));
+        showToast('✅ 點班紀錄已成功儲存！');
+      }
+      setActiveTab('history');
+    } catch(e) { console.error(e); showToast('❌ 儲存失敗，請檢查網路'); }
+  };
+
+  const handleSaveRecord = () => {
+    let warnings = [];
+    if (progress.balanced !== progress.total) warnings.push('目前數量尚未完全吻合');
+    if (activeShiftTasks.length > 0 && !allTasksCompleted) warnings.push(`護理常規清單尚未完成：${taskDoneCount}/${taskTotalCount}，儲存後會在紀錄中標示未完成`);
+    if (warnings.length > 0) {
+      showConfirm(editingRecordId ? '強制更新確認' : '強制儲存確認', `偵測到以下狀況：\n• ${warnings.join('\n• ')}\n\n確定要強制儲存嗎？`, executeSaveRecord);
+    } else { executeSaveRecord(); }
+  };
+
+  const startEditRecord = (record) => {
+    showConfirm('修改紀錄', `將覆蓋畫面上未存檔的資料，載入舊紀錄進行修改？`, () => {
+      setCategories(record.snapshot || initialData); setCurrentDate(record.date); setCurrentShift(record.shift);
+      setTasksDone(record.tasks?.reduce((acc, task) => ({ ...acc, [task.id]: !!task.done }), {}) || {});
+      setEditingRecordId(record.fbId || record.id); setActiveTab('handover'); showToast('✏️ 已載入紀錄');
+    });
+  };
+
+  const handleDeleteRecord = (record) => {
+    const recordId = record.fbId || record.id;
+    showConfirm('刪除紀錄', `確定要刪除 ${record.date} ${record.shift} 的點班紀錄嗎？\n刪除後無法從系統畫面復原。`, async () => {
+      try {
+        if (isFirebaseEnabled && fbUser && record.fbId) {
+          await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'records', record.fbId));
+        } else {
+          setRecords(prev => prev.filter(r => (r.fbId || r.id) !== recordId));
+        }
+        if ((viewingSummary?.fbId || viewingSummary?.id) === recordId) setViewingSummary(null);
+        showToast('🗑️ 紀錄已刪除');
+      } catch (e) {
+        console.error(e);
+        showToast('❌ 刪除失敗，請檢查網路');
+      }
+    });
+  };
+
+  // --- 產出 PNG 邏輯 ---
+  const handleDownloadPNG = async () => {
+    showToast('⏳ 正在產生圖片，請稍候...');
+    try {
+      if (!window.html2canvas) {
+        await new Promise((resolve, reject) => {
+          const script = document.createElement('script');
+          script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+          script.onload = resolve;
+          script.onerror = reject;
+          document.head.appendChild(script);
+        });
+      }
+      const element = document.getElementById('summary-preview-content');
+      if (!element) throw new Error('Element not found');
+      
+      const canvas = await window.html2canvas(element, { scale: 2, useCORS: true, backgroundColor: '#ffffff' });
+      const url = canvas.toDataURL('image/png');
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `交班單_${viewingSummary.date}_${viewingSummary.shift}.png`;
+      a.click();
+      showToast('✅ 圖片下載成功！可至相簿中查看。');
+    } catch (e) {
+      console.error(e);
+      showToast('❌ 圖片產生失敗，請直接使用手機實體鍵截圖。');
+    }
+  };
+
+  // --- UI 元件：彈性計數按鈕 ---
+  const CounterBtn = ({ label, value, icon: Icon, onDec, onInc, theme }) => {
+    const themes = {
+      blue: 'bg-blue-50 text-blue-600 border-blue-200 active:bg-blue-100', emerald: 'bg-emerald-50 text-emerald-600 border-emerald-200 active:bg-emerald-100',
+      amber: 'bg-amber-50 text-amber-600 border-amber-200 active:bg-amber-100', rose: 'bg-rose-50 text-rose-600 border-rose-200 active:bg-rose-100', indigo: 'bg-indigo-50 text-indigo-600 border-indigo-200 active:bg-indigo-100'
+    };
+    return (
+      <div className={`flex-1 flex flex-col items-center p-2 rounded-xl border select-none transition-colors ${themes[theme]} min-w-[60px]`}>
+        <span className="text-[11px] font-bold mb-1 flex items-center gap-1 opacity-80 whitespace-nowrap">{Icon && <Icon size={12} />} {label}</span>
+        <div className="flex items-center justify-between w-full gap-0.5">
+          <button onClick={onDec} className="w-8 h-8 flex items-center justify-center bg-white rounded shadow-sm active:scale-90 active:shadow-inner"><Minus size={16}/></button>
+          <span className="text-base font-bold text-center px-1 flex-1">{value || 0}</span>
+          <button onClick={onInc} className="w-8 h-8 flex items-center justify-center bg-white rounded shadow-sm active:scale-90 active:shadow-inner"><Plus size={16}/></button>
+        </div>
+      </div>
+    );
+  };
+
+  // --- 畫面渲染 ---
+
+  // 1. 截圖總表模式 (全螢幕覆蓋)
+  if (viewingSummary) {
+    const prevRecord = records.find(r => r.fbId !== viewingSummary.fbId && r.id !== viewingSummary.id && new Date(r.timestamp) < new Date(viewingSummary.timestamp));
+    return (
+      <div className="fixed inset-0 bg-slate-100 z-50 overflow-y-auto pb-safe">
+        <div className="max-w-md mx-auto p-4 relative">
+          
+          {/* 截圖範圍開始 */}
+          <div id="summary-preview-content" className="bg-white p-5 rounded-2xl shadow-sm mb-24">
+            <div className="text-center border-b-2 border-slate-800 pb-3 mb-4">
+              <h2 className="text-xl font-black text-slate-800 mb-3">183病房 物品點班系統</h2>
+              <div className="flex items-center justify-center gap-3 mb-3">
+                <AvatarView avatar={viewingSummary.staffAvatar || (viewingSummary.staff === currentUser.name ? currentUser.avatar : '👩‍⚕️')} className="w-12 h-12 rounded-full bg-indigo-50 border border-indigo-200 flex items-center justify-center text-2xl shadow-sm shrink-0" />
+                <div className="text-left">
+                  <div className="text-xs text-slate-400 font-bold">點班者</div>
+                  <div className="text-base font-black text-slate-800">{viewingSummary.staff}</div>
+                </div>
+              </div>
+              <div className="flex justify-center text-sm font-bold text-slate-600">
+                <span>{viewingSummary.date} {viewingSummary.shift}</span>
+              </div>
+              {prevRecord && <div className="text-xs bg-slate-100 text-slate-500 py-1 px-2 rounded mt-2 inline-block font-bold">上一班負責人：{prevRecord.staff}</div>}
+            </div>
+            
+            {viewingSummary.tasks?.length > 0 && (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4">
+                <div className="text-xs font-black text-amber-800 mb-2 flex items-center gap-1"><CheckSquare size={14}/> 護理常規清單</div>
+                <div className="space-y-1">
+                  {viewingSummary.tasks.map(task => (
+                    <div key={task.id} className={`flex items-start gap-1.5 text-[11px] font-bold ${task.done ? 'text-emerald-700' : 'text-rose-700'}`}>
+                      <span>{task.done ? '✓' : '未完成'}</span><span>{task.label}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-4">
+              {viewingSummary.snapshot.map(cat => (
+                <div key={cat.id} className="border border-slate-200 rounded-lg overflow-hidden">
+                  <div className="bg-slate-100 px-3 py-1.5 font-bold text-sm text-slate-800 border-b border-slate-200">{cat.name}</div>
+                  <div className="divide-y divide-slate-100">
+                    {cat.items.map(item => {
+                      const total = getTotal(item);
+                      return (
+                        <div key={item.id} className="p-2 text-xs flex justify-between items-center bg-white">
+                          <div className="font-bold text-slate-800 whitespace-nowrap">{item.name} <span className="text-slate-400 font-normal">({item.standard})</span></div>
+                          <div className="flex flex-wrap justify-end gap-x-2 gap-y-1 text-slate-600 font-medium text-[11px]">
+                            {item.publicCount > 0 && <span className="text-blue-700">公:{item.publicCount}</span>}
+                            {(item.fullCount > 0 || item.emptyCount > 0) && <span className="text-cyan-700">(滿:{item.fullCount} 空:{item.emptyCount})</span>}
+                            {item.beds?.length > 0 && <span className="text-indigo-700">床:{item.beds.join(',')}</span>}
+                            {item.disinfectCount > 0 && <span className="text-emerald-600">消:{item.disinfectCount}</span>}
+                            {item.repairCount > 0 && <span className="text-amber-600">修:{item.repairCount}</span>}
+                            {item.missingCount > 0 && <span className="text-rose-600">少:{item.missingCount}</span>}
+                            {total === 0 && <span className="text-slate-300">0</span>}
+                            {total !== item.standard && <span className="text-red-600 font-bold ml-1">不平({total})</span>}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          {/* 截圖範圍結束 */}
+
+          {/* 懸浮操作列 */}
+          <div className="fixed bottom-4 left-0 right-0 px-4 z-50">
+            <div className="max-w-md mx-auto bg-slate-800/95 backdrop-blur text-white p-3 rounded-2xl shadow-2xl flex gap-2">
+              <button onClick={() => setViewingSummary(null)} className="flex-1 bg-white/20 hover:bg-white/30 py-3 rounded-xl font-bold transition-colors text-sm">關閉</button>
+              <button onClick={handleDownloadPNG} className="flex-1 bg-indigo-500 hover:bg-indigo-600 py-3 rounded-xl font-bold transition-colors text-sm flex items-center justify-center gap-2">
+                <DownloadCloud size={16}/> 下載圖片
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // 2. 未登入畫面 (極簡版)
+  if (!currentUser) {
+    return (
+      <div className="min-h-screen bg-slate-100 flex flex-col items-center justify-center p-6 font-sans">
+        {toastMsg && (<div className="fixed top-4 bg-slate-800 text-white px-5 py-3 rounded-full shadow-xl z-50 text-sm font-bold animate-in fade-in">{toastMsg}</div>)}
+        <div className="w-full max-w-sm bg-white rounded-3xl shadow-xl overflow-hidden border border-slate-100">
+          <div className="bg-indigo-600 p-8 text-center text-white">
+            <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-4 backdrop-blur-sm"><Stethoscope size={32} /></div>
+            <h1 className="text-2xl font-black mb-1">183病房 物品點班系統</h1>
+            <p className="text-indigo-100 font-medium text-sm flex items-center justify-center gap-1">
+               <CheckCircle2 size={14}/> {isFirebaseEnabled ? '雲端同步就緒' : '單機模式 (未連線)'}
+            </p>
+          </div>
+          <div className="p-6">
+            <form onSubmit={handleAuthSubmit} className="space-y-4">
+              <div>
+                <label className="text-sm font-bold text-slate-500 flex items-center gap-1 mb-2"><User size={16}/> 護理人員登入 / 建立</label>
+                <input type="text" required placeholder="請輸入姓名" value={authName} onChange={e => setAuthName(e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-4 focus:ring-2 focus:ring-indigo-500 outline-none font-bold text-lg text-center" />
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-500 flex items-center gap-1 mb-2">選擇您的專屬頭像</label>
+                <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide px-1">
+                  {['👩‍⚕️', '👨‍⚕️', '🐻', '🐰', '🐱', '🐶', '🐼', '🦊', '🐸', '🐯'].map(av => (
+                    <button 
+                      key={av} type="button" 
+                      onClick={() => setAuthAvatar(av)}
+                      className={`text-2xl p-2 rounded-full transition-transform shrink-0 ${authAvatar === av ? 'bg-indigo-100 scale-110 shadow-sm border border-indigo-200' : 'grayscale opacity-40 hover:grayscale-0 hover:opacity-100'}`}
+                    >
+                      {av}
+                    </button>
+                  ))}
+                </div>
+                <div className="mt-2 flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-xl p-3">
+                  <AvatarView avatar={authAvatar} className="w-12 h-12 rounded-full bg-white border border-slate-200 flex items-center justify-center text-2xl shrink-0" />
+                  <label className="flex-1 bg-white border border-indigo-100 text-indigo-700 py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-1 active:scale-95">
+                    <ImagePlus size={14}/> 上傳照片
+                    <input type="file" accept="image/*" className="hidden" onChange={e => handleAvatarFile(e.target.files?.[0], setAuthAvatar)} />
+                  </label>
+                </div>
+              </div>
+              
+              {staffNames.length > 0 && (
+                <div className="flex flex-wrap gap-2 pt-2 items-center justify-center">
+                  <span className="text-[11px] text-slate-400 w-full text-center mb-1">最近登入快速選取：</span>
+                  {staffNames.map(name => {
+                    const savedUser = users.find(u => u.name === name);
+                    const btnAvatar = savedUser?.avatar || '👩‍⚕️';
+                    return (
+                      <button key={name} type="button" onClick={() => handleAuthDirectly(name, btnAvatar)} className="bg-indigo-50 text-indigo-700 border border-indigo-100 px-3 py-1.5 rounded-full text-sm font-bold hover:bg-indigo-100 transition-colors flex items-center gap-1">
+                        <AvatarView avatar={btnAvatar} className="w-5 h-5 rounded-full bg-white flex items-center justify-center text-sm shrink-0" /> {name}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              <button type="submit" className="w-full bg-indigo-600 text-white py-4 rounded-xl font-bold mt-4 hover:bg-indigo-700 active:scale-95 transition-all shadow-md flex justify-center items-center gap-2 text-lg">
+                登入系統
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // 3. 主操作畫面
+  const currentCategoryObj = categories?.find(c => c.id === activeCategory) || categories?.[0];
+
+  return (
+    <div className="app-shell bg-slate-100 font-sans text-slate-800 flex flex-col relative pb-content-safe">
+      <style>{`
+        input[type="text"], input[type="number"], input[type="password"] { -webkit-appearance: none; appearance: none; border-radius: 0.5rem; }
+        .select-none { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+        .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+        .pb-content-safe { padding-bottom: calc(9rem + env(safe-area-inset-bottom)); }
+      `}</style>
+
+      {toastMsg && (<div className="fixed top-4 left-1/2 -translate-x-1/2 bg-slate-800 text-white px-5 py-3 rounded-full shadow-xl z-50 text-sm font-bold animate-in slide-in-from-top-4 fade-in duration-300 flex items-center gap-2 z-50">{toastMsg}</div>)}
+
+      {confirmDialog && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-[24px] shadow-2xl w-full max-w-sm overflow-hidden">
+            <div className="p-6 text-center">
+              <div className="w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-4 bg-amber-100 text-amber-600"><AlertTriangle size={24} /></div>
+              <h3 className="text-xl font-bold text-slate-800 mb-2">{confirmDialog.title}</h3>
+              <p className="text-slate-600 text-sm whitespace-pre-wrap leading-relaxed">{confirmDialog.message}</p>
+            </div>
+            <div className="flex border-t border-slate-100">
+              <button onClick={() => setConfirmDialog(null)} className="flex-1 py-4 text-slate-500 font-bold hover:bg-slate-50 border-r border-slate-100">取消</button>
+              <button onClick={() => { confirmDialog.onConfirm(); setConfirmDialog(null); }} className="flex-1 py-4 text-indigo-600 font-bold hover:bg-indigo-50">確認</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --- 固定頂部區：標題、進度、日期、班別、儲存 --- */}
+      <div className="sticky top-0 z-30 bg-white/95 backdrop-blur-md shadow-sm border-b border-slate-200">
+        <header className="px-4 pt-4 pb-2">
+          <div className="max-w-2xl mx-auto flex justify-between items-center">
+            <div className="flex items-center gap-3 min-w-0">
+              <AvatarView avatar={currentUser.avatar} className="bg-indigo-100 w-11 h-11 rounded-full flex items-center justify-center text-xl shadow-inner border border-indigo-200 shrink-0" />
+              <div className="min-w-0">
+                <h1 className="text-base font-black leading-tight text-slate-800 flex items-center gap-1 truncate"><Stethoscope size={16} className="text-indigo-600 shrink-0"/>183病房 物品點班系統</h1>
+                <p className="text-xs text-slate-500 font-medium truncate">哈囉, {currentUser.name}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3 shrink-0">
+              <div className="flex items-center gap-1.5 bg-slate-50 px-3 py-1.5 rounded-full border border-slate-100">
+                 <span className={`text-sm font-bold ${progress.balanced === progress.total ? 'text-emerald-600' : 'text-blue-600'}`}>{progress.balanced}/{progress.total}</span>
+                 {progress.balanced === progress.total ? <CheckCircle2 size={18} className="text-emerald-500" /> : <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />}
+              </div>
+              <button onClick={handleLogout} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors" title="登出切換帳號">
+                <LogOut size={20} />
+              </button>
+            </div>
+          </div>
+        </header>
+
+        {activeTab === 'handover' && (
+          <div className="max-w-2xl mx-auto px-4 pb-3 space-y-3">
+            <div className="flex gap-2">
+              <input type="date" value={currentDate} onChange={e => setCurrentDate(e.target.value)} className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-sm font-bold text-slate-700" />
+              <select value={currentShift} onChange={e => setCurrentShift(e.target.value)} className="w-24 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-sm font-bold text-slate-700 outline-none">
+                <option value="大夜">大夜</option><option value="白班">白班</option><option value="小夜">小夜</option>
+              </select>
+            </div>
+            <button onClick={handleSaveRecord} className={`w-full text-white py-3 rounded-xl text-sm font-bold flex items-center justify-center gap-2 active:scale-95 transition-transform shadow-md select-none ${editingRecordId ? 'bg-amber-600' : 'bg-indigo-600'}`}>
+              {editingRecordId ? <><Edit3 size={18}/> 更新 {currentDate} {currentShift} 紀錄</> : <><Save size={18}/> 儲存點班紀錄{taskTotalCount > 0 ? `｜常規 ${taskDoneCount}/${taskTotalCount}` : ''}</>}
+            </button>
+            {taskTotalCount > 0 && !allTasksCompleted && (
+              <button type="button" onClick={() => taskListRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })} className="w-full text-[11px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-lg py-1.5">
+                ⚠️ 尚有護理常規未完成，點我查看清單
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      <main className="max-w-2xl mx-auto w-full flex-1 flex flex-col">
+        
+        {/* ================= 模式 1：點班操作 ================= */}
+        {activeTab === 'handover' && (
+          <div className="flex flex-col flex-1 relative">
+            <div className="px-4 space-y-5 pt-5 pb-10">
+              {/* 護理常規待辦 */}
+              {activeShiftTasks.length > 0 && (
+                <div ref={taskListRef} className="bg-amber-50 border border-amber-200 rounded-2xl p-4 shadow-sm scroll-mt-56">
+                  <div className="flex justify-between items-center mb-3">
+                    <h3 className="font-bold text-amber-800 flex items-center gap-2 text-sm"><CheckSquare size={16}/> 護理常規清單</h3>
+                    {allTasksCompleted && <span className="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-2 py-0.5 rounded">完成</span>}
+                  </div>
+                  <div className="space-y-2">
+                    {activeShiftTasks.map(task => (
+                       <label key={task.id} className="flex items-start gap-2 text-sm text-amber-900 font-medium cursor-pointer bg-white/50 p-2 rounded-lg select-none">
+                          <input type="checkbox" checked={tasksDone[task.id]||false} onChange={(e) => setTasksDone(prev => ({...prev, [task.id]: e.target.checked}))} className="mt-0.5 rounded text-amber-600 w-4 h-4" />
+                          <span className={`leading-snug ${tasksDone[task.id] ? 'line-through opacity-50' : ''}`}>{task.label}</span>
+                       </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 點班卡片 */}
+              <div ref={itemListRef} className="space-y-4 animate-in fade-in duration-200 scroll-mt-56">
+                {currentCategoryObj?.items?.map(item => {
+                  const total = getTotal(item);
+                  const isBalanced = total === item.standard;
+                  const diff = total - item.standard;
+                  const currentBedInput = bedInputs[item.id] || '';
+
+                  return (
+                    <div key={item.id} className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 flex flex-col gap-3">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <h3 className="text-base font-bold text-slate-800 leading-tight">{item.name}</h3>
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="text-[11px] text-slate-500 font-medium bg-slate-100 px-2 py-0.5 rounded">標準: {item.standard}</span>
+                            <span className="text-[11px] text-indigo-600 font-bold bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100">實算: {total}</span>
+                          </div>
+                        </div>
+                        <div className={`px-2 py-1 rounded text-[11px] font-black border ${isBalanced ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-red-50 text-red-600 border-red-200'}`}>
+                          {isBalanced ? 'OK' : (diff > 0 ? `多 ${diff}` : `少 ${Math.abs(diff)}`)}
+                        </div>
+                      </div>
+                      
+                      <div className="flex flex-wrap gap-1.5 w-full">
+                        <CounterBtn label="公庫" value={item.publicCount} icon={Package} theme="blue" onDec={() => updateCountByDelta(activeCategory, item.id, 'publicCount', -1)} onInc={() => updateCountByDelta(activeCategory, item.id, 'publicCount', 1)} />
+                        {!item.hideDisinfect && <CounterBtn label="消毒" value={item.disinfectCount} icon={ShieldPlus} theme="indigo" onDec={() => updateCountByDelta(activeCategory, item.id, 'disinfectCount', -1)} onInc={() => updateCountByDelta(activeCategory, item.id, 'disinfectCount', 1)} />}
+                        {!item.hideRepair && <CounterBtn label="維修" value={item.repairCount} icon={Wrench} theme="amber" onDec={() => updateCountByDelta(activeCategory, item.id, 'repairCount', -1)} onInc={() => updateCountByDelta(activeCategory, item.id, 'repairCount', 1)} />}
+                        <CounterBtn label="遺失" value={item.missingCount} icon={AlertOctagon} theme="rose" onDec={() => updateCountByDelta(activeCategory, item.id, 'missingCount', -1)} onInc={() => updateCountByDelta(activeCategory, item.id, 'missingCount', 1)} />
+                      </div>
+
+                      {item.hasFullEmpty && item.publicCount > 0 && (
+                        <div className="bg-cyan-50 p-2.5 rounded-xl border border-cyan-100 flex flex-col gap-2">
+                          <div className="flex justify-between items-center text-xs font-bold text-cyan-800">
+                            <span className="flex items-center gap-1"><Wind size={14}/> 殘壓狀態</span>
+                            {(item.fullCount || 0) + (item.emptyCount || 0) === item.publicCount ? (
+                              <span className="text-emerald-600 flex items-center gap-0.5"><CheckCircle2 size={12}/> 吻合</span>
+                            ) : (
+                              <span className="text-red-500 animate-pulse flex items-center gap-0.5"><AlertCircle size={12}/> 需確認 {item.publicCount} 支</span>
+                            )}
+                          </div>
+                          <div className="flex gap-1.5 w-full">
+                             <CounterBtn label="滿桶" value={item.fullCount} icon={BatteryFull} theme="emerald" onDec={() => updateCountByDelta(activeCategory, item.id, 'fullCount', -1)} onInc={() => updateCountByDelta(activeCategory, item.id, 'fullCount', 1)} />
+                             <CounterBtn label="空桶" value={item.emptyCount} icon={BatteryWarning} theme="amber" onDec={() => updateCountByDelta(activeCategory, item.id, 'emptyCount', -1)} onInc={() => updateCountByDelta(activeCategory, item.id, 'emptyCount', 1)} />
+                          </div>
+                        </div>
+                      )}
+                      
+                      <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                        <div className="flex items-center gap-1.5 mb-2 text-xs font-bold text-slate-700">
+                          <Bed size={14} className="text-indigo-500" /> 床位 ({item.beds?.length || 0})
+                        </div>
+                        {item.beds?.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5 mb-2">
+                            {item.beds.map((bed, idx) => (
+                              <span key={idx} className="flex items-center gap-1 bg-white border border-indigo-200 text-indigo-700 px-2 py-0.5 rounded text-xs font-bold shadow-sm">
+                                {bed} <button onClick={() => removeBed(activeCategory, item.id, idx)} className="text-indigo-400 p-0.5"><X size={12} /></button>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        <div className="flex gap-1.5">
+                          <input type="text" placeholder="輸入床號" value={currentBedInput} onChange={e => setBedInputs(prev => ({...prev, [item.id]: e.target.value}))} onKeyDown={e => { if(e.key==='Enter') { addBed(activeCategory, item.id, currentBedInput); setBedInputs(prev => ({...prev, [item.id]: ''})); } }} className="flex-1 bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs focus:ring-2 focus:ring-indigo-500 outline-none" />
+                          <button onClick={() => { addBed(activeCategory, item.id, currentBedInput); setBedInputs(prev => ({...prev, [item.id]: ''})); }} disabled={!currentBedInput.trim()} className="bg-indigo-600 disabled:bg-indigo-300 text-white px-3 rounded-lg text-xs font-bold active:scale-95">加入</button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="text-center pt-6">
+                <button onClick={resetAllAndInherit} className="text-sm font-bold text-slate-400 hover:text-red-500 flex items-center justify-center gap-1 mx-auto py-2">
+                  <Trash2 size={16}/> 清空畫面，重新點班
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ================= 模式 2：歷史紀錄 ================= */}
+        {activeTab === 'history' && (
+          <div className="space-y-4 px-4 pt-4 animate-in fade-in duration-300">
+            <div className="bg-blue-50 border border-blue-200 p-4 rounded-xl flex justify-between items-center">
+              <div>
+                <h2 className="text-blue-800 font-bold flex items-center gap-2 text-sm"><History size={16}/> 歷史紀錄</h2>
+                <p className="text-[10px] text-blue-600 mt-1">保存最新 100 筆紀錄，點選可產生圖檔報表。</p>
+              </div>
+            </div>
+            {records.length === 0 ? (
+              <div className="text-center py-10 text-slate-400 text-sm font-bold">目前沒有紀錄。</div>
+            ) : (
+              <div className="space-y-3 pb-6">
+                {records.map(record => {
+                  const recordTaskTotal = record.tasksTotal ?? record.tasks?.length ?? 0;
+                  const recordTaskDone = record.tasksCompleted ?? record.tasks?.filter(t => t.done).length ?? 0;
+                  const canManageRecord = record.staff === currentUser.name;
+                  return (
+                    <div key={record.fbId || record.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+                      <div className="flex justify-between items-center border-b border-slate-50 pb-2 mb-2">
+                        <div className="flex items-center gap-2 font-black text-slate-800 text-sm"><Calendar size={14} className="text-indigo-500"/> {record.date} {record.shift}</div>
+                        <div className="flex gap-1.5">
+                          {recordTaskTotal > 0 && (
+                            <span className={`${recordTaskDone === recordTaskTotal ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'} px-2 py-0.5 rounded text-[10px] font-bold`}>常規 {recordTaskDone}/{recordTaskTotal}</span>
+                          )}
+                          {record.isBalanced ? <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded text-[10px] font-bold">平帳</span> : <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded text-[10px] font-bold">異常</span>}
+                        </div>
+                      </div>
+                      <div className="flex justify-between items-center gap-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <AvatarView avatar={record.staffAvatar || (record.staff === currentUser.name ? currentUser.avatar : '👩‍⚕️')} className="w-12 h-12 rounded-full bg-indigo-50 border border-indigo-100 flex items-center justify-center text-2xl shadow-sm shrink-0" />
+                          <div className="min-w-0">
+                            <div className="text-[10px] text-slate-400 font-black leading-tight">點班者</div>
+                            <div className="text-sm text-slate-700 font-black truncate">{record.staff}</div>
+                          </div>
+                        </div>
+                        <div className="flex gap-2 flex-wrap justify-end">
+                          {canManageRecord ? (
+                            <>
+                              <button onClick={() => startEditRecord(record)} className="text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors">
+                                <Edit3 size={12}/> 修改
+                              </button>
+                              <button onClick={() => handleDeleteRecord(record)} className="text-rose-600 bg-rose-50 hover:bg-rose-100 px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors">
+                                <Trash2 size={12}/> 刪除
+                              </button>
+                            </>
+                          ) : (<span className="text-[10px] text-slate-400 px-2 py-1.5">限本人修改/刪除</span>)}
+                          <button onClick={() => setViewingSummary(record)} className="text-white bg-slate-800 hover:bg-slate-700 px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1"><FileText size={12}/> 總表</button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ================= 模式 3：設定 ================= */}
+        {activeTab === 'edit' && (
+          <div className="space-y-4 px-4 pt-4 animate-in fade-in duration-300">
+            <div className="bg-indigo-50 border border-indigo-200 p-4 rounded-xl">
+              <h2 className="text-indigo-800 font-bold flex items-center gap-2 text-sm"><User size={16}/> 我的登入頭像</h2>
+              <div className="flex items-center gap-3 mt-3">
+                <AvatarView avatar={currentUser.avatar} className="w-14 h-14 rounded-full bg-white border border-indigo-200 flex items-center justify-center text-2xl shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-black text-slate-800 truncate">{currentUser.name}</p>
+                  <p className="text-[11px] text-indigo-700/80">可改用內建圖示，或上傳自己的照片。</p>
+                </div>
+              </div>
+              <div className="flex gap-2 overflow-x-auto mt-3 pb-1 scrollbar-hide">
+                {['👩‍⚕️', '👨‍⚕️', '🐻', '🐰', '🐱', '🐶', '🐼', '🦊', '🐸', '🐯'].map(av => (
+                  <button key={av} type="button" onClick={() => updateCurrentAvatar(av)} className="text-xl p-2 rounded-full bg-white border border-indigo-100 shrink-0 active:scale-95">{av}</button>
+                ))}
+              </div>
+              <label className="mt-3 w-full bg-white border border-indigo-100 text-indigo-700 py-2.5 rounded-xl text-sm font-bold flex items-center justify-center gap-2 active:scale-95">
+                <ImagePlus size={16}/> 上傳自己的照片
+                <input type="file" accept="image/*" className="hidden" onChange={e => handleAvatarFile(e.target.files?.[0], updateCurrentAvatar)} />
+              </label>
+            </div>
+
+            <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl">
+              <h2 className="text-amber-800 font-bold flex items-center gap-2 text-sm"><Settings size={16}/> 單位表單設定</h2>
+              <p className="text-xs text-amber-700/80 mt-1">您可以隨時調整各區域的標準數量，或新增/刪除物品。</p>
+            </div>
+            {categories?.map(cat => (
+              <div key={cat.id} className="bg-white rounded-xl p-3 shadow-sm border border-slate-200">
+                <h3 className="font-bold text-slate-800 mb-2 text-sm flex items-center gap-1.5"><CategoryIcon id={cat.id} size={14} /> {cat.name}</h3>
+                <div className="space-y-2">
+                  {cat.items?.map(item => (
+                    <div key={item.id} className="flex gap-2 items-center bg-slate-50 p-2 rounded-lg">
+                      <input type="text" value={item.name} onChange={e => updateItemConfig(cat.id, item.id, 'name', e.target.value)} className="flex-1 w-full max-w-[60%] bg-transparent text-sm font-bold border-b border-slate-300 py-0.5 focus:border-indigo-500 outline-none" />
+                      <div className="w-14 flex flex-col items-center shrink-0">
+                         <input type="number" value={item.standard} onChange={e => updateItemConfig(cat.id, item.id, 'standard', e.target.value)} className="w-full text-center bg-white border border-slate-200 rounded p-1 text-sm font-bold focus:ring-2 focus:ring-indigo-500 outline-none" />
+                      </div>
+                      <button onClick={() => deleteItem(cat.id, item.id)} className="w-8 h-8 flex items-center justify-center text-red-400 hover:bg-red-100 rounded shrink-0 select-none"><Trash2 size={14}/></button>
+                    </div>
+                  ))}
+                  <button onClick={() => addItem(cat.id)} className="w-full py-2 bg-slate-100 text-slate-600 rounded-lg text-sm font-bold flex items-center justify-center gap-1 select-none active:bg-slate-200"><PlusCircle size={14}/> 新增一筆</button>
+                </div>
+              </div>
+            ))}
+            <div className="h-10"></div>
+          </div>
+        )}
+      </main>
+
+      {activeTab === 'handover' && (
+        <div className="category-quick-nav bg-white/95 backdrop-blur-md border-t border-slate-100 px-3 py-2 z-40 shadow-[0_-4px_16px_rgba(15,23,42,0.04)]">
+          <div className="max-w-2xl mx-auto flex overflow-x-auto gap-2 scrollbar-hide">
+            {categories?.map(cat => (
+              <button key={cat.id} onClick={() => handleCategoryChange(cat.id)} className={`shrink-0 px-3 py-2 rounded-full font-bold text-xs transition-all shadow-sm flex items-center gap-1.5 ${activeCategory === cat.id ? 'bg-slate-800 text-white' : 'bg-slate-50 text-slate-600 border border-slate-200'}`}>
+                <CategoryIcon id={cat.id} size={13} />{cat.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 底部導覽列 */}
+      <nav className="bottom-nav bg-white/95 backdrop-blur-md border-t border-slate-200 px-6 z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
+        <div className="bottom-nav-inner max-w-md mx-auto flex justify-between items-center">
+          <button onClick={() => setActiveTab('handover')} className={`flex flex-col items-center gap-1 p-2 transition-colors select-none ${activeTab === 'handover' ? 'text-indigo-600' : 'text-slate-400'}`}>
+            <div className={`p-1.5 rounded-xl ${activeTab === 'handover' ? 'bg-indigo-50' : 'bg-transparent'}`}><LayoutList size={24} strokeWidth={activeTab === 'handover' ? 2.5 : 2} /></div>
+            <span className="text-[10px] font-bold">點班</span>
+          </button>
+          <button onClick={() => setActiveTab('history')} className={`flex flex-col items-center gap-1 p-2 transition-colors select-none ${activeTab === 'history' ? 'text-indigo-600' : 'text-slate-400'}`}>
+             <div className={`p-1.5 rounded-lg ${activeTab === 'history' ? 'bg-indigo-50' : 'bg-transparent'}`}><History size={24} strokeWidth={activeTab === 'history' ? 2.5 : 2} /></div>
+            <span className="text-[10px] font-bold">紀錄</span>
+          </button>
+          <button onClick={() => setActiveTab('edit')} className={`flex flex-col items-center gap-1 p-2 transition-colors select-none ${activeTab === 'edit' ? 'text-indigo-600' : 'text-slate-400'}`}>
+             <div className={`p-1.5 rounded-xl ${activeTab === 'edit' ? 'bg-indigo-50' : 'bg-transparent'}`}><Settings size={24} strokeWidth={activeTab === 'edit' ? 2.5 : 2} /></div>
+            <span className="text-[10px] font-bold">設定</span>
+          </button>
+        </div>
+      </nav>
+    </div>
+  );
+}
