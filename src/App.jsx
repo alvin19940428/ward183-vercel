@@ -189,6 +189,7 @@ export default function App() {
   const [bedInputs, setBedInputs] = useState({}); 
   const [editingRecordId, setEditingRecordId] = useState(null); 
   const [viewingSummary, setViewingSummary] = useState(null); 
+  const [lineSummaryRecord, setLineSummaryRecord] = useState(null); 
   
   const [currentDate, setCurrentDate] = useState(getTodayDate());
   const [currentShift, setCurrentShift] = useState(getAutoShift());
@@ -570,7 +571,7 @@ export default function App() {
       date: currentDate, shift: currentShift, staff: currentUser.name, staffAvatar: currentUser.avatar || '👩‍⚕️',
       timestamp: new Date().toISOString(), isBalanced: progress.balanced === progress.total, snapshot: categories,
       tasks: taskSnapshot, tasksCompleted: taskSnapshot.filter(t => t.done).length, tasksTotal: taskSnapshot.length,
-      abnormalities: abnormalSnapshot, abnormalCount: abnormalSnapshot.length, saveVersion: 'v9-previous-alert'
+      abnormalities: abnormalSnapshot, abnormalCount: abnormalSnapshot.length, saveVersion: 'v10-line-summary'
     };
     try {
       if (targetRecordId && !forceNew) {
@@ -674,6 +675,63 @@ export default function App() {
       showToast('❌ 圖片產生失敗，請直接使用手機實體鍵截圖。');
     }
   };
+
+
+  const buildLineSummaryText = (record) => {
+    if (!record) return '';
+    const abnormalities = getRecordAbnormalItems(record);
+    const unfinishedTasks = (record.tasks || []).filter(task => !task.done);
+    const taskTotal = record.tasksTotal ?? record.tasks?.length ?? 0;
+    const taskDone = record.tasksCompleted ?? record.tasks?.filter(task => task.done).length ?? 0;
+    const followUpLines = [];
+
+    abnormalities.forEach(item => {
+      const diffText = item.diff > 0 ? `多 ${item.diff}` : `少 ${Math.abs(item.diff)}`;
+      const noteText = item.note?.trim() ? `，${item.note.trim()}` : '';
+      followUpLines.push(`- ${item.itemName}${diffText}，實算 ${item.total}/標準 ${item.standard}${noteText}`);
+    });
+
+    unfinishedTasks.forEach(task => {
+      const noteText = task.note?.trim() ? `，${task.note.trim()}` : '';
+      followUpLines.push(`- 常規未完成：${task.label}${noteText}`);
+    });
+
+    return [
+      `183病房 ${record.date} ${record.shift} 點班摘要`,
+      `點班者：${record.staff || '-'}`,
+      `物品狀態：${record.isBalanced ? '平帳' : `異常 ${abnormalities.length} 項`}`,
+      `護理常規：${taskTotal > 0 ? `${taskDone}/${taskTotal}` : '無班別常規'}`,
+      '',
+      '待追蹤：',
+      followUpLines.length > 0 ? followUpLines.join('\n') : '- 無需追蹤事項',
+      '',
+      `產生時間：${new Date().toLocaleString('zh-TW')}`
+    ].join('\n');
+  };
+
+  const copyTextToClipboard = async (text) => {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+      }
+      showToast('✅ 已複製交班摘要，可直接貼到 LINE');
+    } catch (e) {
+      console.error(e);
+      showToast('❌ 複製失敗，請手動選取文字複製');
+    }
+  };
+
+  const copyLineSummary = (record) => copyTextToClipboard(buildLineSummaryText(record));
 
   // --- UI 元件：彈性計數按鈕 ---
   const CounterBtn = ({ label, value, icon: Icon, onDec, onInc, theme }) => {
@@ -779,10 +837,13 @@ export default function App() {
 
           {/* 懸浮操作列 */}
           <div className="fixed bottom-4 left-0 right-0 px-4 z-50">
-            <div className="max-w-md mx-auto bg-slate-800/95 backdrop-blur text-white p-3 rounded-2xl shadow-2xl flex gap-2">
-              <button onClick={() => setViewingSummary(null)} className="flex-1 bg-white/20 hover:bg-white/30 py-3 rounded-xl font-bold transition-colors text-sm">關閉</button>
-              <button onClick={handleDownloadPNG} className="flex-1 bg-indigo-500 hover:bg-indigo-600 py-3 rounded-xl font-bold transition-colors text-sm flex items-center justify-center gap-2">
-                <DownloadCloud size={16}/> 下載圖片
+            <div className="max-w-md mx-auto bg-slate-800/95 backdrop-blur text-white p-3 rounded-2xl shadow-2xl grid grid-cols-3 gap-2">
+              <button onClick={() => setViewingSummary(null)} className="bg-white/20 hover:bg-white/30 py-3 rounded-xl font-bold transition-colors text-sm">關閉</button>
+              <button onClick={() => copyLineSummary(viewingSummary)} className="bg-emerald-500 hover:bg-emerald-600 py-3 rounded-xl font-bold transition-colors text-sm flex items-center justify-center gap-1">
+                <ClipboardList size={15}/> 摘要
+              </button>
+              <button onClick={handleDownloadPNG} className="bg-indigo-500 hover:bg-indigo-600 py-3 rounded-xl font-bold transition-colors text-sm flex items-center justify-center gap-1">
+                <DownloadCloud size={15}/> 圖片
               </button>
             </div>
           </div>
@@ -883,6 +944,28 @@ export default function App() {
             <div className="flex border-t border-slate-100">
               <button onClick={() => setConfirmDialog(null)} className="flex-1 py-4 text-slate-500 font-bold hover:bg-slate-50 border-r border-slate-100">取消</button>
               <button onClick={() => { confirmDialog.onConfirm(); setConfirmDialog(null); }} className="flex-1 py-4 text-indigo-600 font-bold hover:bg-indigo-50">確認</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {lineSummaryRecord && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-[24px] shadow-2xl w-full max-w-md overflow-hidden">
+            <div className="p-5 border-b border-slate-100">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-black text-slate-800 flex items-center gap-2"><ClipboardList size={18} className="text-emerald-600"/> LINE 交班摘要</h3>
+                  <p className="text-xs text-slate-500 font-bold mt-1">可直接複製後貼到群組或交班訊息。</p>
+                </div>
+                <button onClick={() => setLineSummaryRecord(null)} className="w-9 h-9 rounded-full bg-slate-100 text-slate-500 flex items-center justify-center"><X size={18}/></button>
+              </div>
+            </div>
+            <div className="p-5 space-y-3">
+              <pre className="bg-slate-50 border border-slate-200 rounded-2xl p-3 text-xs leading-relaxed whitespace-pre-wrap text-slate-800 max-h-[45vh] overflow-y-auto">{buildLineSummaryText(lineSummaryRecord)}</pre>
+              <button onClick={() => copyLineSummary(lineSummaryRecord)} className="w-full bg-emerald-600 text-white py-3 rounded-xl text-sm font-bold flex items-center justify-center gap-2 active:scale-95">
+                <ClipboardList size={16}/> 複製交班摘要
+              </button>
             </div>
           </div>
         </div>
@@ -1171,7 +1254,7 @@ export default function App() {
               <div className="flex justify-between items-start gap-3">
                 <div>
                   <h2 className="text-blue-800 font-bold flex items-center gap-2 text-sm"><History size={16}/> 歷史紀錄</h2>
-                  <p className="text-[10px] text-blue-600 mt-1">保存最新 100 筆紀錄，點選可產生圖檔報表。v9 上一班提醒版</p>
+                  <p className="text-[10px] text-blue-600 mt-1">保存最新 100 筆紀錄，點選可產生圖檔報表。v10 交班摘要版</p>
                 </div>
                 <span className="bg-white text-blue-700 border border-blue-100 px-3 py-1 rounded-full text-xs font-black shrink-0">共 {filteredRecords.length} 筆</span>
               </div>
@@ -1260,6 +1343,7 @@ export default function App() {
                                 </button>
                               </>
                             ) : (<span className="text-[10px] text-slate-400 px-2 py-1.5">限本人修改/刪除</span>)}
+                            <button onClick={() => setLineSummaryRecord(record)} className="text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1"><ClipboardList size={12}/> 摘要</button>
                             <button onClick={() => setViewingSummary(record)} className="text-white bg-slate-800 hover:bg-slate-700 px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1"><FileText size={12}/> 總表</button>
                           </div>
                         </div>

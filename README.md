@@ -28,3 +28,9 @@ npm run dev
 2. 啟用 Authentication 的 Anonymous 匿名登入。
 3. 建立 Cloud Firestore。
 4. 設定 Firestore Security Rules。
+
+## v10 更新
+- 新增 LINE 交班摘要，可從歷史紀錄或總表快速複製。
+- 保留 v9 上一班追蹤提醒、v8 歷史篩選、v7 防重複與備註。
+- 已移除專案最外層多餘的 main.jsx 與 index.css；正式入口維持 src/main.jsx 與 src/index.css。
+
