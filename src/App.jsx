@@ -199,6 +199,9 @@ export default function App() {
   // 提示狀態
   const [toastMsg, setToastMsg] = useState(null);
   const [confirmDialog, setConfirmDialog] = useState(null);
+  const [saveReview, setSaveReview] = useState(null);
+  const [abnormalNotes, setAbnormalNotes] = useState({});
+  const [taskNotes, setTaskNotes] = useState({});
 
   // --- Firebase 同步設定 (只同步紀錄與表單，不再同步密碼帳號) ---
   useEffect(() => {
@@ -230,8 +233,17 @@ export default function App() {
   useEffect(() => { localStorage.setItem('ward183_staff_names', JSON.stringify(staffNames)); }, [staffNames]);
   useEffect(() => { localStorage.setItem('ward183_local_records', JSON.stringify(records)); }, [records]);
   useEffect(() => { localStorage.setItem('ward183_local_live', JSON.stringify(categories)); }, [categories]);
-  useEffect(() => { try { setTasksDone(JSON.parse(localStorage.getItem(tasksStorageKey)) || {}); } catch { setTasksDone({}); } }, [tasksStorageKey]);
+  useEffect(() => {
+    try {
+      setTasksDone(JSON.parse(localStorage.getItem(tasksStorageKey)) || {});
+      setTaskNotes(JSON.parse(localStorage.getItem(`${tasksStorageKey}_notes`)) || {});
+    } catch {
+      setTasksDone({});
+      setTaskNotes({});
+    }
+  }, [tasksStorageKey]);
   useEffect(() => { localStorage.setItem(tasksStorageKey, JSON.stringify(tasksDone)); }, [tasksDone, tasksStorageKey]);
+  useEffect(() => { localStorage.setItem(`${tasksStorageKey}_notes`, JSON.stringify(taskNotes)); }, [taskNotes, tasksStorageKey]);
 
   const showToast = (msg) => { setToastMsg(msg); setTimeout(() => setToastMsg(null), 3000); };
   const showConfirm = (title, message, onConfirm) => { setConfirmDialog({ title, message, onConfirm }); };
@@ -378,41 +390,111 @@ export default function App() {
   const taskTotalCount = activeShiftTasks.length;
   const allTasksCompleted = taskTotalCount === 0 || taskDoneCount === taskTotalCount;
 
-  const executeSaveRecord = async () => {
-    const taskSnapshot = activeShiftTasks.map(task => ({ ...task, done: !!tasksDone[task.id] }));
+  const getItemKey = (catId, itemId) => `${catId}__${itemId}`;
+
+  const getAbnormalItems = () => {
+    const items = [];
+    categories?.forEach(cat => cat.items?.forEach(item => {
+      const total = getTotal(item);
+      if (total !== item.standard) {
+        items.push({
+          key: getItemKey(cat.id, item.id),
+          catId: cat.id, itemId: item.id, catName: cat.name, itemName: item.name,
+          standard: item.standard, total, diff: total - item.standard
+        });
+      }
+    }));
+    return items;
+  };
+
+  const getDuplicateRecord = () => records.find(record => {
+    const recordId = record.fbId || record.id;
+    return record.date === currentDate && record.shift === currentShift && recordId !== editingRecordId;
+  });
+
+  const buildTaskSnapshot = () => activeShiftTasks.map(task => ({
+    ...task,
+    done: !!tasksDone[task.id],
+    note: taskNotes[task.id]?.trim() || ''
+  }));
+
+  const buildAbnormalSnapshot = (abnormalItems) => abnormalItems.map(item => ({
+    ...item,
+    note: abnormalNotes[item.key]?.trim() || ''
+  }));
+
+  const validateSaveNotes = (abnormalItems, unfinishedTasks) => {
+    const missingAbnormalNotes = abnormalItems.filter(item => !abnormalNotes[item.key]?.trim());
+    const missingTaskNotes = unfinishedTasks.filter(task => !taskNotes[task.id]?.trim());
+    if (missingAbnormalNotes.length > 0 || missingTaskNotes.length > 0) {
+      showToast('⚠️ 請先填寫異常原因或常規未完成原因');
+      return false;
+    }
+    return true;
+  };
+
+  const executeSaveRecord = async ({ targetRecordId = editingRecordId, forceNew = false, review = saveReview } = {}) => {
+    const abnormalItems = review?.abnormalItems || getAbnormalItems();
+    const taskSnapshot = buildTaskSnapshot();
+    const abnormalSnapshot = buildAbnormalSnapshot(abnormalItems);
     const recordData = {
       date: currentDate, shift: currentShift, staff: currentUser.name, staffAvatar: currentUser.avatar || '👩‍⚕️',
       timestamp: new Date().toISOString(), isBalanced: progress.balanced === progress.total, snapshot: categories,
-      tasks: taskSnapshot, tasksCompleted: taskSnapshot.filter(t => t.done).length, tasksTotal: taskSnapshot.length
+      tasks: taskSnapshot, tasksCompleted: taskSnapshot.filter(t => t.done).length, tasksTotal: taskSnapshot.length,
+      abnormalities: abnormalSnapshot, abnormalCount: abnormalSnapshot.length, saveVersion: 'v7-safety-notes'
     };
     try {
-      if (editingRecordId) {
-        if (isFirebaseEnabled && fbUser) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'records', editingRecordId), recordData);
-        else setRecords(prev => prev.map(r => r.fbId === editingRecordId ? { ...recordData, fbId: r.fbId } : r));
-        showToast('✅ 紀錄已成功更新！'); setEditingRecordId(null);
+      if (targetRecordId && !forceNew) {
+        if (isFirebaseEnabled && fbUser) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'records', targetRecordId), recordData);
+        else setRecords(prev => prev.map(r => (r.fbId || r.id) === targetRecordId ? { ...recordData, fbId: r.fbId || targetRecordId, id: r.id } : r));
+        showToast('✅ 紀錄已成功更新！');
+        setEditingRecordId(null);
       } else {
         const newId = Date.now().toString();
         if (isFirebaseEnabled && fbUser) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'records', newId), recordData);
         else setRecords(prev => [{ ...recordData, fbId: newId }, ...prev].slice(0, 100));
         showToast('✅ 點班紀錄已成功儲存！');
       }
+      setSaveReview(null);
       setActiveTab('history');
     } catch(e) { console.error(e); showToast('❌ 儲存失敗，請檢查網路'); }
   };
 
   const handleSaveRecord = () => {
-    let warnings = [];
-    if (progress.balanced !== progress.total) warnings.push('目前數量尚未完全吻合');
-    if (activeShiftTasks.length > 0 && !allTasksCompleted) warnings.push(`護理常規清單尚未完成：${taskDoneCount}/${taskTotalCount}，儲存後會在紀錄中標示未完成`);
-    if (warnings.length > 0) {
-      showConfirm(editingRecordId ? '強制更新確認' : '強制儲存確認', `偵測到以下狀況：\n• ${warnings.join('\n• ')}\n\n確定要強制儲存嗎？`, executeSaveRecord);
-    } else { executeSaveRecord(); }
+    const abnormalItems = getAbnormalItems();
+    const unfinishedTasks = activeShiftTasks.filter(task => !tasksDone[task.id]);
+    const duplicateRecord = !editingRecordId ? getDuplicateRecord() : null;
+    const needsReview = duplicateRecord || abnormalItems.length > 0 || unfinishedTasks.length > 0;
+    if (!needsReview) {
+      executeSaveRecord({ forceNew: false, review: { abnormalItems, unfinishedTasks, duplicateRecord } });
+      return;
+    }
+    setSaveReview({ abnormalItems, unfinishedTasks, duplicateRecord });
+  };
+
+  const confirmSaveFromReview = (mode = 'save') => {
+    if (!saveReview) return;
+    const abnormalItems = saveReview.abnormalItems || [];
+    const unfinishedTasks = saveReview.unfinishedTasks || [];
+    if (!validateSaveNotes(abnormalItems, unfinishedTasks)) return;
+    if (mode === 'updateDuplicate') {
+      const targetId = saveReview.duplicateRecord?.fbId || saveReview.duplicateRecord?.id;
+      executeSaveRecord({ targetRecordId: targetId, forceNew: false, review: saveReview });
+      return;
+    }
+    if (mode === 'createNew') {
+      executeSaveRecord({ targetRecordId: null, forceNew: true, review: saveReview });
+      return;
+    }
+    executeSaveRecord({ targetRecordId: editingRecordId, forceNew: false, review: saveReview });
   };
 
   const startEditRecord = (record) => {
     showConfirm('修改紀錄', `將覆蓋畫面上未存檔的資料，載入舊紀錄進行修改？`, () => {
       setCategories(record.snapshot || initialData); setCurrentDate(record.date); setCurrentShift(record.shift);
       setTasksDone(record.tasks?.reduce((acc, task) => ({ ...acc, [task.id]: !!task.done }), {}) || {});
+      setTaskNotes(record.tasks?.reduce((acc, task) => ({ ...acc, [task.id]: task.note || '' }), {}) || {});
+      setAbnormalNotes(record.abnormalities?.reduce((acc, item) => ({ ...acc, [item.key]: item.note || '' }), {}) || {});
       setEditingRecordId(record.fbId || record.id); setActiveTab('handover'); showToast('✏️ 已載入紀錄');
     });
   };
@@ -513,8 +595,23 @@ export default function App() {
                 <div className="text-xs font-black text-amber-800 mb-2 flex items-center gap-1"><CheckSquare size={14}/> 護理常規清單</div>
                 <div className="space-y-1">
                   {viewingSummary.tasks.map(task => (
-                    <div key={task.id} className={`flex items-start gap-1.5 text-[11px] font-bold ${task.done ? 'text-emerald-700' : 'text-rose-700'}`}>
-                      <span>{task.done ? '✓' : '未完成'}</span><span>{task.label}</span>
+                    <div key={task.id} className={`text-[11px] font-bold ${task.done ? 'text-emerald-700' : 'text-rose-700'}`}>
+                      <div className="flex items-start gap-1.5"><span>{task.done ? '✓' : '未完成'}</span><span>{task.label}</span></div>
+                      {!task.done && task.note && <div className="ml-12 mt-0.5 text-amber-800 font-medium">原因：{task.note}</div>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {viewingSummary.abnormalities?.length > 0 && (
+              <div className="bg-red-50 border border-red-200 rounded-xl p-3 mb-4">
+                <div className="text-xs font-black text-red-700 mb-2 flex items-center gap-1"><AlertOctagon size={14}/> 異常原因與處理備註</div>
+                <div className="space-y-2">
+                  {viewingSummary.abnormalities.map(item => (
+                    <div key={item.key} className="bg-white/70 rounded-lg p-2 text-[11px]">
+                      <div className="font-black text-slate-800">{item.catName} / {item.itemName}：{item.diff > 0 ? `多 ${item.diff}` : `少 ${Math.abs(item.diff)}`}，實算 {item.total}/標準 {item.standard}</div>
+                      {item.note && <div className="text-red-700 font-medium mt-0.5">原因：{item.note}</div>}
                     </div>
                   ))}
                 </div>
@@ -662,6 +759,78 @@ export default function App() {
         </div>
       )}
 
+      {saveReview && (
+        <div className="fixed inset-0 bg-slate-900/45 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-[24px] shadow-2xl w-full max-w-md max-h-[88vh] overflow-hidden flex flex-col">
+            <div className="p-5 border-b border-slate-100">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-black text-slate-800 flex items-center gap-2"><AlertTriangle size={20} className="text-amber-500"/> 儲存前確認</h3>
+                  <p className="text-xs text-slate-500 mt-1 leading-relaxed">v7 會防止同日同班重複建立，並把異常原因與常規未完成原因一起存入紀錄。</p>
+                </div>
+                <button onClick={() => setSaveReview(null)} className="p-2 text-slate-400 hover:text-slate-700"><X size={18}/></button>
+              </div>
+            </div>
+
+            <div className="p-5 overflow-y-auto space-y-4">
+              {saveReview.duplicateRecord && (
+                <div className="bg-rose-50 border border-rose-200 rounded-2xl p-4">
+                  <div className="font-black text-rose-700 text-sm mb-1">同日同班已有紀錄</div>
+                  <div className="text-xs text-rose-700/80 leading-relaxed">{currentDate} {currentShift} 已有一筆由 {saveReview.duplicateRecord.staff} 建立的點班紀錄。建議選擇「更新原紀錄」，避免歷史紀錄重複。</div>
+                </div>
+              )}
+
+              {saveReview.abnormalItems?.length > 0 && (
+                <div className="bg-red-50 border border-red-200 rounded-2xl p-4">
+                  <div className="font-black text-red-700 text-sm mb-2 flex items-center gap-1"><AlertOctagon size={15}/> 異常原因備註</div>
+                  <div className="space-y-3">
+                    {saveReview.abnormalItems.map(item => (
+                      <div key={item.key} className="bg-white/70 rounded-xl p-3 border border-red-100">
+                        <div className="flex justify-between gap-2 text-xs font-black text-slate-800 mb-2">
+                          <span>{item.catName} / {item.itemName}</span>
+                          <span className="text-red-600 shrink-0">{item.diff > 0 ? `多 ${item.diff}` : `少 ${Math.abs(item.diff)}`}｜實算 {item.total}/標準 {item.standard}</span>
+                        </div>
+                        <textarea value={abnormalNotes[item.key] || ''} onChange={e => setAbnormalNotes(prev => ({ ...prev, [item.key]: e.target.value }))} placeholder="請填寫原因，例如：借出185病房、送消尚未回、病人床邊使用中..." className="w-full min-h-[72px] bg-white border border-red-100 rounded-xl px-3 py-2 text-xs font-medium focus:ring-2 focus:ring-red-200 outline-none resize-none" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {saveReview.unfinishedTasks?.length > 0 && (
+                <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4">
+                  <div className="font-black text-amber-800 text-sm mb-2 flex items-center gap-1"><CheckSquare size={15}/> 常規未完成原因</div>
+                  <div className="space-y-3">
+                    {saveReview.unfinishedTasks.map(task => (
+                      <div key={task.id} className="bg-white/70 rounded-xl p-3 border border-amber-100">
+                        <div className="text-xs font-black text-slate-800 mb-2">{task.label}</div>
+                        <textarea value={taskNotes[task.id] || ''} onChange={e => setTaskNotes(prev => ({ ...prev, [task.id]: e.target.value }))} placeholder="請填寫未完成原因或交班處理，例如：已交班小夜接續完成..." className="w-full min-h-[72px] bg-white border border-amber-100 rounded-xl px-3 py-2 text-xs font-medium focus:ring-2 focus:ring-amber-200 outline-none resize-none" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {!saveReview.duplicateRecord && saveReview.abnormalItems?.length === 0 && saveReview.unfinishedTasks?.length === 0 && (
+                <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 text-sm font-bold text-emerald-700">所有項目皆正常，可以儲存。</div>
+              )}
+            </div>
+
+            <div className="p-4 border-t border-slate-100 bg-slate-50 space-y-2">
+              {saveReview.duplicateRecord ? (
+                <div className="grid grid-cols-2 gap-2">
+                  <button onClick={() => confirmSaveFromReview('updateDuplicate')} className="bg-indigo-600 text-white py-3 rounded-xl text-sm font-black active:scale-95">更新原紀錄</button>
+                  <button onClick={() => confirmSaveFromReview('createNew')} className="bg-white border border-slate-200 text-slate-700 py-3 rounded-xl text-sm font-black active:scale-95">仍新增一筆</button>
+                </div>
+              ) : (
+                <button onClick={() => confirmSaveFromReview('save')} className="w-full bg-indigo-600 text-white py-3 rounded-xl text-sm font-black active:scale-95">{editingRecordId ? '確認更新紀錄' : '確認儲存紀錄'}</button>
+              )}
+              <button onClick={() => setSaveReview(null)} className="w-full bg-white text-slate-500 py-2.5 rounded-xl text-sm font-bold border border-slate-200">返回修改</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* --- 固定頂部區：標題、進度、日期、班別、儲存 --- */}
       <div className="sticky top-0 z-30 bg-white/95 backdrop-blur-md shadow-sm border-b border-slate-200">
         <header className="px-4 pt-4 pb-2">
@@ -720,10 +889,15 @@ export default function App() {
                   </div>
                   <div className="space-y-2">
                     {activeShiftTasks.map(task => (
-                       <label key={task.id} className="flex items-start gap-2 text-sm text-amber-900 font-medium cursor-pointer bg-white/50 p-2 rounded-lg select-none">
-                          <input type="checkbox" checked={tasksDone[task.id]||false} onChange={(e) => setTasksDone(prev => ({...prev, [task.id]: e.target.checked}))} className="mt-0.5 rounded text-amber-600 w-4 h-4" />
-                          <span className={`leading-snug ${tasksDone[task.id] ? 'line-through opacity-50' : ''}`}>{task.label}</span>
-                       </label>
+                       <div key={task.id} className="bg-white/50 p-2 rounded-lg">
+                         <label className="flex items-start gap-2 text-sm text-amber-900 font-medium cursor-pointer select-none">
+                            <input type="checkbox" checked={tasksDone[task.id]||false} onChange={(e) => setTasksDone(prev => ({...prev, [task.id]: e.target.checked}))} className="mt-0.5 rounded text-amber-600 w-4 h-4" />
+                            <span className={`leading-snug ${tasksDone[task.id] ? 'line-through opacity-50' : ''}`}>{task.label}</span>
+                         </label>
+                         {!tasksDone[task.id] && taskNotes[task.id]?.trim() && (
+                           <div className="ml-6 mt-1 text-[11px] text-amber-700 font-bold bg-amber-100/60 rounded px-2 py-1">未完成原因：{taskNotes[task.id]}</div>
+                         )}
+                       </div>
                     ))}
                   </div>
                 </div>
@@ -814,7 +988,7 @@ export default function App() {
             <div className="bg-blue-50 border border-blue-200 p-4 rounded-xl flex justify-between items-center">
               <div>
                 <h2 className="text-blue-800 font-bold flex items-center gap-2 text-sm"><History size={16}/> 歷史紀錄</h2>
-                <p className="text-[10px] text-blue-600 mt-1">保存最新 100 筆紀錄，點選可產生圖檔報表。v6 頭像版</p>
+                <p className="text-[10px] text-blue-600 mt-1">保存最新 100 筆紀錄，點選可產生圖檔報表。v7 防重複＋備註版</p>
               </div>
             </div>
             {records.length === 0 ? (
@@ -825,6 +999,8 @@ export default function App() {
                   const recordTaskTotal = record.tasksTotal ?? record.tasks?.length ?? 0;
                   const recordTaskDone = record.tasksCompleted ?? record.tasks?.filter(t => t.done).length ?? 0;
                   const canManageRecord = record.staff === currentUser.name;
+                  const abnormalNoteCount = record.abnormalities?.filter(item => item.note)?.length || 0;
+                  const taskNoteCount = record.tasks?.filter(task => !task.done && task.note)?.length || 0;
                   return (
                     <div key={record.fbId || record.id} className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
                       <div className="flex items-start gap-3">
@@ -839,6 +1015,7 @@ export default function App() {
                               {recordTaskTotal > 0 && (
                                 <span className={`${recordTaskDone === recordTaskTotal ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'} px-2 py-0.5 rounded text-[10px] font-bold`}>常規 {recordTaskDone}/{recordTaskTotal}</span>
                               )}
+                              {(abnormalNoteCount > 0 || taskNoteCount > 0) && <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded text-[10px] font-bold">備註 {abnormalNoteCount + taskNoteCount}</span>}
                               {record.isBalanced ? <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded text-[10px] font-bold">平帳</span> : <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded text-[10px] font-bold">異常</span>}
                             </div>
                           </div>
