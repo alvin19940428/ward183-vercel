@@ -515,11 +515,12 @@ export default function App() {
   const currentCategoryObj = categories?.find(c => c.id === activeCategory) || categories?.[0];
 
   return (
-    <div className="min-h-screen bg-slate-100 font-sans text-slate-800 flex flex-col relative pb-safe">
+    <div className="app-shell bg-slate-100 font-sans text-slate-800 flex flex-col relative pb-content-safe">
       <style>{`
         input[type="text"], input[type="number"], input[type="password"] { -webkit-appearance: none; appearance: none; border-radius: 0.5rem; }
         .select-none { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
-        .pb-safe { padding-bottom: calc(4.5rem + env(safe-area-inset-bottom)); }
+        .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+        .pb-content-safe { padding-bottom: calc(5.75rem + env(safe-area-inset-bottom)); }
       `}</style>
 
       {toastMsg && (<div className="fixed top-4 left-1/2 -translate-x-1/2 bg-slate-800 text-white px-5 py-3 rounded-full shadow-xl z-50 text-sm font-bold animate-in slide-in-from-top-4 fade-in duration-300 flex items-center gap-2 z-50">{toastMsg}</div>)}
@@ -540,50 +541,52 @@ export default function App() {
         </div>
       )}
 
-      {/* --- 全域 Header --- */}
-      <header className="bg-white px-4 pt-4 pb-2">
-        <div className="max-w-2xl mx-auto flex justify-between items-center">
-          <div className="flex items-center gap-3">
-            <div className="bg-indigo-100 w-11 h-11 rounded-full flex items-center justify-center text-xl shadow-inner border border-indigo-200">
-              {currentUser.avatar || '👩‍⚕️'}
+      {/* --- 固定頂部區：標題、進度、日期、班別、儲存 --- */}
+      <div className="sticky top-0 z-30 bg-white/95 backdrop-blur-md shadow-sm border-b border-slate-200">
+        <header className="px-4 pt-4 pb-2">
+          <div className="max-w-2xl mx-auto flex justify-between items-center">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="bg-indigo-100 w-11 h-11 rounded-full flex items-center justify-center text-xl shadow-inner border border-indigo-200 shrink-0">
+                {currentUser.avatar || '👩‍⚕️'}
+              </div>
+              <div className="min-w-0">
+                <h1 className="text-base font-black leading-tight text-slate-800 flex items-center gap-1 truncate"><Stethoscope size={16} className="text-indigo-600 shrink-0"/>183病房 物品點班系統</h1>
+                <p className="text-xs text-slate-500 font-medium truncate">哈囉, {currentUser.name}</p>
+              </div>
             </div>
-            <div>
-              <h1 className="text-base font-black leading-tight text-slate-800 flex items-center gap-1"><Stethoscope size={16} className="text-indigo-600"/>183病房 物品點班系統</h1>
-              <p className="text-xs text-slate-500 font-medium">哈囉, {currentUser.name}</p>
+            <div className="flex items-center gap-3 shrink-0">
+              <div className="flex items-center gap-1.5 bg-slate-50 px-3 py-1.5 rounded-full border border-slate-100">
+                 <span className={`text-sm font-bold ${progress.balanced === progress.total ? 'text-emerald-600' : 'text-blue-600'}`}>{progress.balanced}/{progress.total}</span>
+                 {progress.balanced === progress.total ? <CheckCircle2 size={18} className="text-emerald-500" /> : <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />}
+              </div>
+              <button onClick={handleLogout} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors" title="登出切換帳號">
+                <LogOut size={20} />
+              </button>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1.5 bg-slate-50 px-3 py-1.5 rounded-full border border-slate-100">
-               <span className={`text-sm font-bold ${progress.balanced === progress.total ? 'text-emerald-600' : 'text-blue-600'}`}>{progress.balanced}/{progress.total}</span>
-               {progress.balanced === progress.total ? <CheckCircle2 size={18} className="text-emerald-500" /> : <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />}
+        </header>
+
+        {activeTab === 'handover' && (
+          <div className="max-w-2xl mx-auto px-4 pb-3 space-y-3">
+            <div className="flex gap-2">
+              <input type="date" value={currentDate} onChange={e => setCurrentDate(e.target.value)} className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-sm font-bold text-slate-700" />
+              <select value={currentShift} onChange={e => setCurrentShift(e.target.value)} className="w-24 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-sm font-bold text-slate-700 outline-none">
+                <option value="大夜">大夜</option><option value="白班">白班</option><option value="小夜">小夜</option>
+              </select>
             </div>
-            <button onClick={handleLogout} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors" title="登出切換帳號">
-              <LogOut size={20} />
+            <button onClick={handleSaveRecord} className={`w-full text-white py-3 rounded-xl text-sm font-bold flex items-center justify-center gap-2 active:scale-95 transition-transform shadow-md select-none ${editingRecordId ? 'bg-amber-600' : 'bg-indigo-600'}`}>
+              {editingRecordId ? <><Edit3 size={18}/> 更新 {currentDate} {currentShift} 紀錄</> : <><Save size={18}/> 儲存點班紀錄</>}
             </button>
           </div>
-        </div>
-      </header>
+        )}
+      </div>
 
       <main className="max-w-2xl mx-auto w-full flex-1 flex flex-col">
         
-        {/* ================= 模式 1：點班操作 (含置頂儲存列) ================= */}
+        {/* ================= 模式 1：點班操作 ================= */}
         {activeTab === 'handover' && (
           <div className="flex flex-col flex-1 relative">
-            
-            {/* 置頂控制列 (日期、班別、儲存) */}
-            <div className="sticky top-0 z-20 bg-white/95 backdrop-blur-md shadow-sm border-b border-slate-200 p-3 mb-4 space-y-3">
-              <div className="flex gap-2">
-                <input type="date" value={currentDate} onChange={e => setCurrentDate(e.target.value)} className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-sm font-bold text-slate-700" />
-                <select value={currentShift} onChange={e => setCurrentShift(e.target.value)} className="w-24 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-sm font-bold text-slate-700 outline-none">
-                  <option value="大夜">大夜</option><option value="白班">白班</option><option value="小夜">小夜</option>
-                </select>
-              </div>
-              <button onClick={handleSaveRecord} className={`w-full text-white py-3 rounded-xl text-sm font-bold flex items-center justify-center gap-2 active:scale-95 transition-transform shadow-md select-none ${editingRecordId ? 'bg-amber-600' : 'bg-indigo-600'}`}>
-                {editingRecordId ? <><Edit3 size={18}/> 更新 {currentDate} {currentShift} 紀錄</> : <><Save size={18}/> 儲存點班紀錄</>}
-              </button>
-            </div>
-
-            <div className="px-4 space-y-5 pb-10">
+            <div className="px-4 space-y-5 pt-5 pb-10">
               {/* 護理常規待辦 */}
               {activeShiftTasks.length > 0 && (
                 <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 shadow-sm">
@@ -757,8 +760,8 @@ export default function App() {
       </main>
 
       {/* 底部導覽列 */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-md border-t border-slate-200 pb-safe pt-2 px-6 z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
-        <div className="max-w-md mx-auto flex justify-between items-center">
+      <nav className="bottom-nav bg-white/95 backdrop-blur-md border-t border-slate-200 px-6 z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
+        <div className="bottom-nav-inner max-w-md mx-auto flex justify-between items-center">
           <button onClick={() => setActiveTab('handover')} className={`flex flex-col items-center gap-1 p-2 transition-colors select-none ${activeTab === 'handover' ? 'text-indigo-600' : 'text-slate-400'}`}>
             <div className={`p-1.5 rounded-xl ${activeTab === 'handover' ? 'bg-indigo-50' : 'bg-transparent'}`}><LayoutList size={24} strokeWidth={activeTab === 'handover' ? 2.5 : 2} /></div>
             <span className="text-[10px] font-bold">點班</span>
