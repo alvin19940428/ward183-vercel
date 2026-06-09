@@ -109,7 +109,7 @@ const createAvatarDataUrl = (file) => new Promise((resolve, reject) => {
   reader.onload = () => {
     const img = new Image();
     img.onload = () => {
-      const size = 256;
+      const size = 160;
       const canvas = document.createElement('canvas');
       canvas.width = size;
       canvas.height = size;
@@ -122,7 +122,7 @@ const createAvatarDataUrl = (file) => new Promise((resolve, reject) => {
       const x = (size - width) / 2;
       const y = (size - height) / 2;
       ctx.drawImage(img, x, y, width, height);
-      resolve(canvas.toDataURL('image/jpeg', 0.82));
+      resolve(canvas.toDataURL('image/jpeg', 0.74));
     };
     img.onerror = () => reject(new Error('圖片讀取失敗'));
     img.src = reader.result;
@@ -381,7 +381,7 @@ export default function App() {
   const executeSaveRecord = async () => {
     const taskSnapshot = activeShiftTasks.map(task => ({ ...task, done: !!tasksDone[task.id] }));
     const recordData = {
-      date: currentDate, shift: currentShift, staff: currentUser.name, 
+      date: currentDate, shift: currentShift, staff: currentUser.name, staffAvatar: currentUser.avatar || '👩‍⚕️',
       timestamp: new Date().toISOString(), isBalanced: progress.balanced === progress.total, snapshot: categories,
       tasks: taskSnapshot, tasksCompleted: taskSnapshot.filter(t => t.done).length, tasksTotal: taskSnapshot.length
     };
@@ -494,10 +494,16 @@ export default function App() {
           {/* 截圖範圍開始 */}
           <div id="summary-preview-content" className="bg-white p-5 rounded-2xl shadow-sm mb-24">
             <div className="text-center border-b-2 border-slate-800 pb-3 mb-4">
-              <h2 className="text-xl font-black text-slate-800 mb-2">183病房 物品點班系統</h2>
-              <div className="flex justify-between text-sm font-bold text-slate-600">
+              <h2 className="text-xl font-black text-slate-800 mb-3">183病房 物品點班系統</h2>
+              <div className="flex items-center justify-center gap-3 mb-3">
+                <AvatarView avatar={viewingSummary.staffAvatar || (viewingSummary.staff === currentUser.name ? currentUser.avatar : '👩‍⚕️')} className="w-12 h-12 rounded-full bg-indigo-50 border border-indigo-200 flex items-center justify-center text-2xl shadow-sm shrink-0" />
+                <div className="text-left">
+                  <div className="text-xs text-slate-400 font-bold">點班者</div>
+                  <div className="text-base font-black text-slate-800">{viewingSummary.staff}</div>
+                </div>
+              </div>
+              <div className="flex justify-center text-sm font-bold text-slate-600">
                 <span>{viewingSummary.date} {viewingSummary.shift}</span>
-                <span>點班者：{viewingSummary.staff}</span>
               </div>
               {prevRecord && <div className="text-xs bg-slate-100 text-slate-500 py-1 px-2 rounded mt-2 inline-block font-bold">上一班負責人：{prevRecord.staff}</div>}
             </div>
@@ -808,7 +814,7 @@ export default function App() {
             <div className="bg-blue-50 border border-blue-200 p-4 rounded-xl flex justify-between items-center">
               <div>
                 <h2 className="text-blue-800 font-bold flex items-center gap-2 text-sm"><History size={16}/> 歷史紀錄</h2>
-                <p className="text-[10px] text-blue-600 mt-1">保存最新 100 筆紀錄，點選可產生圖檔報表。</p>
+                <p className="text-[10px] text-blue-600 mt-1">保存最新 100 筆紀錄，點選可產生圖檔報表。v6 頭像版</p>
               </div>
             </div>
             {records.length === 0 ? (
@@ -820,30 +826,35 @@ export default function App() {
                   const recordTaskDone = record.tasksCompleted ?? record.tasks?.filter(t => t.done).length ?? 0;
                   const canManageRecord = record.staff === currentUser.name;
                   return (
-                    <div key={record.fbId || record.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
-                      <div className="flex justify-between items-center border-b border-slate-50 pb-2 mb-2">
-                        <div className="flex items-center gap-2 font-black text-slate-800 text-sm"><Calendar size={14} className="text-indigo-500"/> {record.date} {record.shift}</div>
-                        <div className="flex gap-1.5">
-                          {recordTaskTotal > 0 && (
-                            <span className={`${recordTaskDone === recordTaskTotal ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'} px-2 py-0.5 rounded text-[10px] font-bold`}>常規 {recordTaskDone}/{recordTaskTotal}</span>
-                          )}
-                          {record.isBalanced ? <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded text-[10px] font-bold">平帳</span> : <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded text-[10px] font-bold">異常</span>}
-                        </div>
-                      </div>
-                      <div className="flex justify-between items-center gap-2">
-                        <div className="text-xs text-slate-600 flex items-center gap-1 font-medium"><User size={12}/> {record.staff}</div>
-                        <div className="flex gap-2 flex-wrap justify-end">
-                          {canManageRecord ? (
-                            <>
-                              <button onClick={() => startEditRecord(record)} className="text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors">
-                                <Edit3 size={12}/> 修改
-                              </button>
-                              <button onClick={() => handleDeleteRecord(record)} className="text-rose-600 bg-rose-50 hover:bg-rose-100 px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors">
-                                <Trash2 size={12}/> 刪除
-                              </button>
-                            </>
-                          ) : (<span className="text-[10px] text-slate-400 px-2 py-1.5">限本人修改/刪除</span>)}
-                          <button onClick={() => setViewingSummary(record)} className="text-white bg-slate-800 hover:bg-slate-700 px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1"><FileText size={12}/> 總表</button>
+                    <div key={record.fbId || record.id} className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+                      <div className="flex items-start gap-3">
+                        <AvatarView avatar={record.staffAvatar || (record.staff === currentUser.name ? currentUser.avatar : '👩‍⚕️')} className="w-14 h-14 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-3xl shadow-sm shrink-0" />
+                        <div className="min-w-0 flex-1">
+                          <div className="flex justify-between items-start gap-2 border-b border-slate-50 pb-2 mb-2">
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2 font-black text-slate-800 text-base leading-tight truncate"><Calendar size={16} className="text-indigo-500 shrink-0"/> {record.date} {record.shift}</div>
+                              <div className="text-xs text-slate-500 font-bold mt-1 truncate">點班者：{record.staff}</div>
+                            </div>
+                            <div className="flex gap-1.5 flex-wrap justify-end shrink-0">
+                              {recordTaskTotal > 0 && (
+                                <span className={`${recordTaskDone === recordTaskTotal ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'} px-2 py-0.5 rounded text-[10px] font-bold`}>常規 {recordTaskDone}/{recordTaskTotal}</span>
+                              )}
+                              {record.isBalanced ? <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded text-[10px] font-bold">平帳</span> : <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded text-[10px] font-bold">異常</span>}
+                            </div>
+                          </div>
+                          <div className="flex gap-2 flex-wrap justify-end">
+                            {canManageRecord ? (
+                              <>
+                                <button onClick={() => startEditRecord(record)} className="text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors">
+                                  <Edit3 size={12}/> 修改
+                                </button>
+                                <button onClick={() => handleDeleteRecord(record)} className="text-rose-600 bg-rose-50 hover:bg-rose-100 px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors">
+                                  <Trash2 size={12}/> 刪除
+                                </button>
+                              </>
+                            ) : (<span className="text-[10px] text-slate-400 px-2 py-1.5">限本人修改/刪除</span>)}
+                            <button onClick={() => setViewingSummary(record)} className="text-white bg-slate-800 hover:bg-slate-700 px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1"><FileText size={12}/> 總表</button>
+                          </div>
                         </div>
                       </div>
                     </div>
