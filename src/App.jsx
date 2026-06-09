@@ -450,6 +450,75 @@ export default function App() {
     setHistoryStatusFilter('all');
   };
 
+  const getShiftOrderIndex = (shift) => ({ '大夜': 0, '白班': 1, '小夜': 2 }[shift] ?? 0);
+
+  const getRecordOrderKey = (dateStr, shift) => {
+    const dateNumber = parseInt((dateStr || '').replace(/-/g, ''), 10);
+    if (!dateNumber) return 0;
+    return dateNumber * 10 + getShiftOrderIndex(shift);
+  };
+
+  const getPreviousShiftTarget = (dateStr, shift) => {
+    if (shift === '白班') return { date: dateStr, shift: '大夜' };
+    if (shift === '小夜') return { date: dateStr, shift: '白班' };
+    const date = new Date(`${dateStr}T00:00:00`);
+    if (Number.isNaN(date.getTime())) return { date: dateStr, shift: '小夜' };
+    date.setDate(date.getDate() - 1);
+    return { date: getLocalDateString(date), shift: '小夜' };
+  };
+
+  const getRecordAbnormalItems = (record) => {
+    if (!record) return [];
+    if (Array.isArray(record.abnormalities) && record.abnormalities.length > 0) return record.abnormalities;
+    const items = [];
+    record.snapshot?.forEach(cat => cat.items?.forEach(item => {
+      const total = getTotal(item);
+      if (total !== item.standard) {
+        items.push({
+          key: getItemKey(cat.id, item.id),
+          catId: cat.id, itemId: item.id, catName: cat.name, itemName: item.name,
+          standard: item.standard, total, diff: total - item.standard, note: ''
+        });
+      }
+    }));
+    return items;
+  };
+
+  const previousShiftSummary = useMemo(() => {
+    if (!records.length || !currentDate || !currentShift) return null;
+    const target = getPreviousShiftTarget(currentDate, currentShift);
+    const exactRecord = records.find(record => record.date === target.date && record.shift === target.shift);
+    const currentKey = getRecordOrderKey(currentDate, currentShift);
+    const fallbackRecord = [...records]
+      .filter(record => getRecordOrderKey(record.date, record.shift) < currentKey)
+      .sort((a, b) => getRecordOrderKey(b.date, b.shift) - getRecordOrderKey(a.date, a.shift))[0];
+    const record = exactRecord || fallbackRecord || null;
+    if (!record) return null;
+    const abnormalities = getRecordAbnormalItems(record);
+    const unfinishedTasks = (record.tasks || []).filter(task => !task.done);
+    return {
+      target,
+      record,
+      isExact: !!exactRecord,
+      abnormalities,
+      unfinishedTasks,
+      hasFollowUp: abnormalities.length > 0 || unfinishedTasks.length > 0 || !record.isBalanced
+    };
+  }, [records, currentDate, currentShift]);
+
+  const applyPreviousShiftBeds = () => {
+    const snapshot = previousShiftSummary?.record?.snapshot || [];
+    if (!snapshot.length) return showToast('⚠️ 找不到上一班床位資料');
+    setCategories(prev => prev.map(cat => ({
+      ...cat,
+      items: cat.items.map(item => {
+        const pastBeds = snapshot.find(c => c.id === cat.id)?.items?.find(i => i.id === item.id)?.beds || [];
+        return { ...item, beds: pastBeds };
+      })
+    })));
+    showToast('✅ 已帶入上一班床位資料');
+  };
+
   const getItemKey = (catId, itemId) => `${catId}__${itemId}`;
 
   const getAbnormalItems = () => {
@@ -501,7 +570,7 @@ export default function App() {
       date: currentDate, shift: currentShift, staff: currentUser.name, staffAvatar: currentUser.avatar || '👩‍⚕️',
       timestamp: new Date().toISOString(), isBalanced: progress.balanced === progress.total, snapshot: categories,
       tasks: taskSnapshot, tasksCompleted: taskSnapshot.filter(t => t.done).length, tasksTotal: taskSnapshot.length,
-      abnormalities: abnormalSnapshot, abnormalCount: abnormalSnapshot.length, saveVersion: 'v8-history-filters'
+      abnormalities: abnormalSnapshot, abnormalCount: abnormalSnapshot.length, saveVersion: 'v9-previous-alert'
     };
     try {
       if (targetRecordId && !forceNew) {
@@ -940,6 +1009,59 @@ export default function App() {
         {activeTab === 'handover' && (
           <div className="flex flex-col flex-1 relative">
             <div className="px-4 space-y-5 pt-5 pb-10">
+              {/* 上一班追蹤提醒 */}
+              {previousShiftSummary && (
+                <div className={`${previousShiftSummary.hasFollowUp ? 'bg-rose-50 border-rose-200' : 'bg-emerald-50 border-emerald-200'} border rounded-2xl p-4 shadow-sm`}>
+                  <div className="flex justify-between items-start gap-3 mb-3">
+                    <div>
+                      <h3 className={`font-black flex items-center gap-2 text-sm ${previousShiftSummary.hasFollowUp ? 'text-rose-800' : 'text-emerald-800'}`}>
+                        <AlertTriangle size={16}/> 上一班追蹤提醒
+                      </h3>
+                      <p className={`text-[11px] mt-1 font-bold ${previousShiftSummary.hasFollowUp ? 'text-rose-700/80' : 'text-emerald-700/80'}`}>
+                        {previousShiftSummary.isExact ? '已找到指定上一班' : '未找到指定上一班，改顯示最近一筆紀錄'}：{previousShiftSummary.record.date} {previousShiftSummary.record.shift}，{previousShiftSummary.record.staff}
+                      </p>
+                    </div>
+                    <span className={`${previousShiftSummary.hasFollowUp ? 'bg-white text-rose-700 border-rose-100' : 'bg-white text-emerald-700 border-emerald-100'} border px-2 py-0.5 rounded-full text-[10px] font-black shrink-0`}>
+                      {previousShiftSummary.hasFollowUp ? '需追蹤' : '無異常'}
+                    </span>
+                  </div>
+
+                  {previousShiftSummary.abnormalities.length > 0 ? (
+                    <div className="space-y-2 mb-3">
+                      <div className="text-[11px] font-black text-rose-700 flex items-center gap-1"><AlertOctagon size={13}/> 上一班異常物品</div>
+                      {previousShiftSummary.abnormalities.slice(0, 4).map(item => (
+                        <div key={item.key} className="bg-white/80 rounded-xl border border-rose-100 p-2 text-[11px]">
+                          <div className="font-black text-slate-800">{item.catName} / {item.itemName}：{item.diff > 0 ? `多 ${item.diff}` : `少 ${Math.abs(item.diff)}`}，實算 {item.total}/標準 {item.standard}</div>
+                          {item.note && <div className="text-rose-700 font-bold mt-0.5">原因：{item.note}</div>}
+                        </div>
+                      ))}
+                      {previousShiftSummary.abnormalities.length > 4 && (
+                        <div className="text-[11px] text-rose-700 font-bold">另有 {previousShiftSummary.abnormalities.length - 4} 項，請查看總表。</div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="bg-white/70 rounded-xl border border-emerald-100 p-2 text-[11px] text-emerald-700 font-bold mb-3">上一班物品無異常紀錄。</div>
+                  )}
+
+                  {previousShiftSummary.unfinishedTasks.length > 0 && (
+                    <div className="space-y-2 mb-3">
+                      <div className="text-[11px] font-black text-amber-700 flex items-center gap-1"><CheckSquare size={13}/> 上一班常規未完成</div>
+                      {previousShiftSummary.unfinishedTasks.map(task => (
+                        <div key={task.id} className="bg-white/80 rounded-xl border border-amber-100 p-2 text-[11px]">
+                          <div className="font-black text-slate-800">{task.label}</div>
+                          {task.note && <div className="text-amber-700 font-bold mt-0.5">交班原因：{task.note}</div>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  <div className="flex gap-2 pt-1">
+                    <button type="button" onClick={() => setViewingSummary(previousShiftSummary.record)} className="flex-1 bg-slate-800 text-white py-2 rounded-xl text-xs font-bold active:scale-95 flex items-center justify-center gap-1"><FileText size={13}/> 看上一班總表</button>
+                    <button type="button" onClick={applyPreviousShiftBeds} className="flex-1 bg-white text-indigo-700 border border-indigo-100 py-2 rounded-xl text-xs font-bold active:scale-95 flex items-center justify-center gap-1"><Bed size={13}/> 帶入床位</button>
+                  </div>
+                </div>
+              )}
+
               {/* 護理常規待辦 */}
               {activeShiftTasks.length > 0 && (
                 <div ref={taskListRef} className="bg-amber-50 border border-amber-200 rounded-2xl p-4 shadow-sm scroll-mt-56">
@@ -1049,7 +1171,7 @@ export default function App() {
               <div className="flex justify-between items-start gap-3">
                 <div>
                   <h2 className="text-blue-800 font-bold flex items-center gap-2 text-sm"><History size={16}/> 歷史紀錄</h2>
-                  <p className="text-[10px] text-blue-600 mt-1">保存最新 100 筆紀錄，點選可產生圖檔報表。v8 篩選版</p>
+                  <p className="text-[10px] text-blue-600 mt-1">保存最新 100 筆紀錄，點選可產生圖檔報表。v9 上一班提醒版</p>
                 </div>
                 <span className="bg-white text-blue-700 border border-blue-100 px-3 py-1 rounded-full text-xs font-black shrink-0">共 {filteredRecords.length} 筆</span>
               </div>
