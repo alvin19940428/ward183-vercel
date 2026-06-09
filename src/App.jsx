@@ -5,11 +5,11 @@ import {
   Package, LayoutList, FileText, X, Check, Clock, User, History, Calendar,
   BatteryFull, BatteryWarning, Wind, CheckSquare, Snowflake, 
   Stethoscope, Layers, Activity, Monitor, Move, AlertTriangle,
-  LogOut, Settings, DownloadCloud, Edit3, Printer, ClipboardList, PlusCircle
+  LogOut, Settings, DownloadCloud, Edit3, Printer, ClipboardList, PlusCircle, ImagePlus
 } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, doc, setDoc, onSnapshot } from 'firebase/firestore';
+import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 
 // --- 初始表單資料 (已將冰箱區移至最後) ---
 const initialData = [
@@ -91,6 +91,46 @@ const CategoryIcon = ({ id, size = 16, className = "" }) => {
   }
 };
 
+
+const AvatarView = ({ avatar, className = "", imgClassName = "w-full h-full object-cover" }) => {
+  const isImageAvatar = typeof avatar === 'string' && avatar.startsWith('data:image');
+  return (
+    <div className={`${className} overflow-hidden`}>
+      {isImageAvatar ? <img src={avatar} alt="使用者頭像" className={imgClassName} /> : <span>{avatar || '👩‍⚕️'}</span>}
+    </div>
+  );
+};
+
+const createAvatarDataUrl = (file) => new Promise((resolve, reject) => {
+  if (!file) return reject(new Error('No file selected'));
+  if (!file.type?.startsWith('image/')) return reject(new Error('請選擇圖片檔'));
+
+  const reader = new FileReader();
+  reader.onload = () => {
+    const img = new Image();
+    img.onload = () => {
+      const size = 256;
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, size, size);
+      const scale = Math.max(size / img.width, size / img.height);
+      const width = img.width * scale;
+      const height = img.height * scale;
+      const x = (size - width) / 2;
+      const y = (size - height) / 2;
+      ctx.drawImage(img, x, y, width, height);
+      resolve(canvas.toDataURL('image/jpeg', 0.82));
+    };
+    img.onerror = () => reject(new Error('圖片讀取失敗'));
+    img.src = reader.result;
+  };
+  reader.onerror = () => reject(new Error('圖片讀取失敗'));
+  reader.readAsDataURL(file);
+});
+
 const getAutoShift = () => {
   const hour = new Date().getHours();
   if (hour >= 0 && hour < 8) return '大夜';
@@ -152,6 +192,9 @@ export default function App() {
   
   const [currentDate, setCurrentDate] = useState(getTodayDate());
   const [currentShift, setCurrentShift] = useState(getAutoShift());
+  const itemListRef = useRef(null);
+  const taskListRef = useRef(null);
+  const tasksStorageKey = `ward183_tasks_${currentDate}_${currentShift}`;
 
   // 提示狀態
   const [toastMsg, setToastMsg] = useState(null);
@@ -187,9 +230,45 @@ export default function App() {
   useEffect(() => { localStorage.setItem('ward183_staff_names', JSON.stringify(staffNames)); }, [staffNames]);
   useEffect(() => { localStorage.setItem('ward183_local_records', JSON.stringify(records)); }, [records]);
   useEffect(() => { localStorage.setItem('ward183_local_live', JSON.stringify(categories)); }, [categories]);
+  useEffect(() => { try { setTasksDone(JSON.parse(localStorage.getItem(tasksStorageKey)) || {}); } catch { setTasksDone({}); } }, [tasksStorageKey]);
+  useEffect(() => { localStorage.setItem(tasksStorageKey, JSON.stringify(tasksDone)); }, [tasksDone, tasksStorageKey]);
 
   const showToast = (msg) => { setToastMsg(msg); setTimeout(() => setToastMsg(null), 3000); };
   const showConfirm = (title, message, onConfirm) => { setConfirmDialog({ title, message, onConfirm }); };
+
+  const updateSavedUserAvatar = (name, avatar) => {
+    setUsers(prev => {
+      const exists = prev.some(u => u.name === name);
+      if (exists) return prev.map(u => u.name === name ? { ...u, avatar } : u);
+      return [...prev, { name, avatar }];
+    });
+  };
+
+  const updateCurrentAvatar = (avatar) => {
+    if (!currentUser?.name) return;
+    setCurrentUser(prev => ({ ...prev, avatar }));
+    updateSavedUserAvatar(currentUser.name, avatar);
+    showToast('✅ 頭像已更新');
+  };
+
+  const handleAvatarFile = async (file, applyAvatar) => {
+    if (!file) return;
+    try {
+      const avatarDataUrl = await createAvatarDataUrl(file);
+      applyAvatar(avatarDataUrl);
+      showToast('✅ 已設定照片頭像');
+    } catch (e) {
+      console.error(e);
+      showToast('❌ 圖片讀取失敗，請換一張照片');
+    }
+  };
+
+  const handleCategoryChange = (catId) => {
+    setActiveCategory(catId);
+    requestAnimationFrame(() => {
+      itemListRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  };
 
   // --- 登入 (極簡：認名字與頭像) ---
   const handleAuthDirectly = (name, avatar = authAvatar) => {
@@ -202,14 +281,7 @@ export default function App() {
     }
 
     // 更新使用者名單 (紀錄選取的頭像)
-    const existingUserIndex = users.findIndex(u => u.name === trimmedName);
-    if (existingUserIndex >= 0) {
-      const updatedUsers = [...users];
-      updatedUsers[existingUserIndex].avatar = avatar;
-      setUsers(updatedUsers);
-    } else {
-      setUsers([...users, { name: trimmedName, avatar }]);
-    }
+    updateSavedUserAvatar(trimmedName, avatar);
     
     setCurrentUser({ name: trimmedName, avatar }); 
     showToast(`👋 歡迎，${trimmedName} 護理師！`); 
@@ -302,12 +374,16 @@ export default function App() {
   }, [categories]);
 
   const activeShiftTasks = shiftTasksConfig[currentShift] || [];
-  const allTasksCompleted = activeShiftTasks.every(t => tasksDone[t.id]);
+  const taskDoneCount = activeShiftTasks.filter(t => tasksDone[t.id]).length;
+  const taskTotalCount = activeShiftTasks.length;
+  const allTasksCompleted = taskTotalCount === 0 || taskDoneCount === taskTotalCount;
 
   const executeSaveRecord = async () => {
+    const taskSnapshot = activeShiftTasks.map(task => ({ ...task, done: !!tasksDone[task.id] }));
     const recordData = {
       date: currentDate, shift: currentShift, staff: currentUser.name, 
-      timestamp: new Date().toISOString(), isBalanced: progress.balanced === progress.total, snapshot: categories
+      timestamp: new Date().toISOString(), isBalanced: progress.balanced === progress.total, snapshot: categories,
+      tasks: taskSnapshot, tasksCompleted: taskSnapshot.filter(t => t.done).length, tasksTotal: taskSnapshot.length
     };
     try {
       if (editingRecordId) {
@@ -327,7 +403,7 @@ export default function App() {
   const handleSaveRecord = () => {
     let warnings = [];
     if (progress.balanced !== progress.total) warnings.push('目前數量尚未完全吻合');
-    if (activeShiftTasks.length > 0 && !allTasksCompleted) warnings.push('尚有班別專屬待辦事項未打勾');
+    if (activeShiftTasks.length > 0 && !allTasksCompleted) warnings.push(`護理常規清單尚未完成：${taskDoneCount}/${taskTotalCount}，儲存後會在紀錄中標示未完成`);
     if (warnings.length > 0) {
       showConfirm(editingRecordId ? '強制更新確認' : '強制儲存確認', `偵測到以下狀況：\n• ${warnings.join('\n• ')}\n\n確定要強制儲存嗎？`, executeSaveRecord);
     } else { executeSaveRecord(); }
@@ -336,7 +412,26 @@ export default function App() {
   const startEditRecord = (record) => {
     showConfirm('修改紀錄', `將覆蓋畫面上未存檔的資料，載入舊紀錄進行修改？`, () => {
       setCategories(record.snapshot || initialData); setCurrentDate(record.date); setCurrentShift(record.shift);
+      setTasksDone(record.tasks?.reduce((acc, task) => ({ ...acc, [task.id]: !!task.done }), {}) || {});
       setEditingRecordId(record.fbId || record.id); setActiveTab('handover'); showToast('✏️ 已載入紀錄');
+    });
+  };
+
+  const handleDeleteRecord = (record) => {
+    const recordId = record.fbId || record.id;
+    showConfirm('刪除紀錄', `確定要刪除 ${record.date} ${record.shift} 的點班紀錄嗎？\n刪除後無法從系統畫面復原。`, async () => {
+      try {
+        if (isFirebaseEnabled && fbUser && record.fbId) {
+          await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'records', record.fbId));
+        } else {
+          setRecords(prev => prev.filter(r => (r.fbId || r.id) !== recordId));
+        }
+        if ((viewingSummary?.fbId || viewingSummary?.id) === recordId) setViewingSummary(null);
+        showToast('🗑️ 紀錄已刪除');
+      } catch (e) {
+        console.error(e);
+        showToast('❌ 刪除失敗，請檢查網路');
+      }
     });
   };
 
@@ -407,6 +502,19 @@ export default function App() {
               {prevRecord && <div className="text-xs bg-slate-100 text-slate-500 py-1 px-2 rounded mt-2 inline-block font-bold">上一班負責人：{prevRecord.staff}</div>}
             </div>
             
+            {viewingSummary.tasks?.length > 0 && (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4">
+                <div className="text-xs font-black text-amber-800 mb-2 flex items-center gap-1"><CheckSquare size={14}/> 護理常規清單</div>
+                <div className="space-y-1">
+                  {viewingSummary.tasks.map(task => (
+                    <div key={task.id} className={`flex items-start gap-1.5 text-[11px] font-bold ${task.done ? 'text-emerald-700' : 'text-rose-700'}`}>
+                      <span>{task.done ? '✓' : '未完成'}</span><span>{task.label}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="space-y-4">
               {viewingSummary.snapshot.map(cat => (
                 <div key={cat.id} className="border border-slate-200 rounded-lg overflow-hidden">
@@ -484,6 +592,13 @@ export default function App() {
                     </button>
                   ))}
                 </div>
+                <div className="mt-2 flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-xl p-3">
+                  <AvatarView avatar={authAvatar} className="w-12 h-12 rounded-full bg-white border border-slate-200 flex items-center justify-center text-2xl shrink-0" />
+                  <label className="flex-1 bg-white border border-indigo-100 text-indigo-700 py-2 rounded-lg text-xs font-bold flex items-center justify-center gap-1 active:scale-95">
+                    <ImagePlus size={14}/> 上傳照片
+                    <input type="file" accept="image/*" className="hidden" onChange={e => handleAvatarFile(e.target.files?.[0], setAuthAvatar)} />
+                  </label>
+                </div>
               </div>
               
               {staffNames.length > 0 && (
@@ -494,7 +609,7 @@ export default function App() {
                     const btnAvatar = savedUser?.avatar || '👩‍⚕️';
                     return (
                       <button key={name} type="button" onClick={() => handleAuthDirectly(name, btnAvatar)} className="bg-indigo-50 text-indigo-700 border border-indigo-100 px-3 py-1.5 rounded-full text-sm font-bold hover:bg-indigo-100 transition-colors flex items-center gap-1">
-                        {btnAvatar} {name}
+                        <AvatarView avatar={btnAvatar} className="w-5 h-5 rounded-full bg-white flex items-center justify-center text-sm shrink-0" /> {name}
                       </button>
                     );
                   })}
@@ -520,7 +635,7 @@ export default function App() {
         input[type="text"], input[type="number"], input[type="password"] { -webkit-appearance: none; appearance: none; border-radius: 0.5rem; }
         .select-none { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
         .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
-        .pb-content-safe { padding-bottom: calc(5.75rem + env(safe-area-inset-bottom)); }
+        .pb-content-safe { padding-bottom: calc(9rem + env(safe-area-inset-bottom)); }
       `}</style>
 
       {toastMsg && (<div className="fixed top-4 left-1/2 -translate-x-1/2 bg-slate-800 text-white px-5 py-3 rounded-full shadow-xl z-50 text-sm font-bold animate-in slide-in-from-top-4 fade-in duration-300 flex items-center gap-2 z-50">{toastMsg}</div>)}
@@ -546,9 +661,7 @@ export default function App() {
         <header className="px-4 pt-4 pb-2">
           <div className="max-w-2xl mx-auto flex justify-between items-center">
             <div className="flex items-center gap-3 min-w-0">
-              <div className="bg-indigo-100 w-11 h-11 rounded-full flex items-center justify-center text-xl shadow-inner border border-indigo-200 shrink-0">
-                {currentUser.avatar || '👩‍⚕️'}
-              </div>
+              <AvatarView avatar={currentUser.avatar} className="bg-indigo-100 w-11 h-11 rounded-full flex items-center justify-center text-xl shadow-inner border border-indigo-200 shrink-0" />
               <div className="min-w-0">
                 <h1 className="text-base font-black leading-tight text-slate-800 flex items-center gap-1 truncate"><Stethoscope size={16} className="text-indigo-600 shrink-0"/>183病房 物品點班系統</h1>
                 <p className="text-xs text-slate-500 font-medium truncate">哈囉, {currentUser.name}</p>
@@ -575,8 +688,13 @@ export default function App() {
               </select>
             </div>
             <button onClick={handleSaveRecord} className={`w-full text-white py-3 rounded-xl text-sm font-bold flex items-center justify-center gap-2 active:scale-95 transition-transform shadow-md select-none ${editingRecordId ? 'bg-amber-600' : 'bg-indigo-600'}`}>
-              {editingRecordId ? <><Edit3 size={18}/> 更新 {currentDate} {currentShift} 紀錄</> : <><Save size={18}/> 儲存點班紀錄</>}
+              {editingRecordId ? <><Edit3 size={18}/> 更新 {currentDate} {currentShift} 紀錄</> : <><Save size={18}/> 儲存點班紀錄{taskTotalCount > 0 ? `｜常規 ${taskDoneCount}/${taskTotalCount}` : ''}</>}
             </button>
+            {taskTotalCount > 0 && !allTasksCompleted && (
+              <button type="button" onClick={() => taskListRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })} className="w-full text-[11px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-lg py-1.5">
+                ⚠️ 尚有護理常規未完成，點我查看清單
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -589,7 +707,7 @@ export default function App() {
             <div className="px-4 space-y-5 pt-5 pb-10">
               {/* 護理常規待辦 */}
               {activeShiftTasks.length > 0 && (
-                <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 shadow-sm">
+                <div ref={taskListRef} className="bg-amber-50 border border-amber-200 rounded-2xl p-4 shadow-sm scroll-mt-56">
                   <div className="flex justify-between items-center mb-3">
                     <h3 className="font-bold text-amber-800 flex items-center gap-2 text-sm"><CheckSquare size={16}/> 護理常規清單</h3>
                     {allTasksCompleted && <span className="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-2 py-0.5 rounded">完成</span>}
@@ -605,17 +723,8 @@ export default function App() {
                 </div>
               )}
 
-              {/* 分類標籤 */}
-              <div className="flex overflow-x-auto pb-1 gap-2 snap-x scrollbar-hide -mx-4 px-4">
-                {categories?.map(cat => (
-                  <button key={cat.id} onClick={() => setActiveCategory(cat.id)} className={`snap-start shrink-0 px-4 py-2 rounded-full font-bold text-sm transition-all shadow-sm flex items-center gap-1.5 ${activeCategory === cat.id ? 'bg-slate-800 text-white' : 'bg-white text-slate-600 border border-slate-200'}`}>
-                    <CategoryIcon id={cat.id} size={14} />{cat.name}
-                  </button>
-                ))}
-              </div>
-
               {/* 點班卡片 */}
-              <div className="space-y-4 animate-in fade-in duration-200">
+              <div ref={itemListRef} className="space-y-4 animate-in fade-in duration-200 scroll-mt-56">
                 {currentCategoryObj?.items?.map(item => {
                   const total = getTotal(item);
                   const isBalanced = total === item.standard;
@@ -706,25 +815,40 @@ export default function App() {
               <div className="text-center py-10 text-slate-400 text-sm font-bold">目前沒有紀錄。</div>
             ) : (
               <div className="space-y-3 pb-6">
-                {records.map(record => (
-                  <div key={record.fbId || record.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
-                    <div className="flex justify-between items-center border-b border-slate-50 pb-2 mb-2">
-                      <div className="flex items-center gap-2 font-black text-slate-800 text-sm"><Calendar size={14} className="text-indigo-500"/> {record.date} {record.shift}</div>
-                      {record.isBalanced ? <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded text-[10px] font-bold">平帳</span> : <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded text-[10px] font-bold">異常</span>}
-                    </div>
-                    <div className="flex justify-between items-center">
-                      <div className="text-xs text-slate-600 flex items-center gap-1 font-medium"><User size={12}/> {record.staff}</div>
-                      <div className="flex gap-2">
-                        {record.staff === currentUser.name ? (
-                          <button onClick={() => startEditRecord(record)} className="text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors">
-                            <Edit3 size={12}/> 修改
-                          </button>
-                        ) : (<span className="text-[10px] text-slate-400 px-2 py-1.5">限本人修改</span>)}
-                        <button onClick={() => setViewingSummary(record)} className="text-white bg-slate-800 hover:bg-slate-700 px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1"><FileText size={12}/> 總表</button>
+                {records.map(record => {
+                  const recordTaskTotal = record.tasksTotal ?? record.tasks?.length ?? 0;
+                  const recordTaskDone = record.tasksCompleted ?? record.tasks?.filter(t => t.done).length ?? 0;
+                  const canManageRecord = record.staff === currentUser.name;
+                  return (
+                    <div key={record.fbId || record.id} className="bg-white p-4 rounded-xl shadow-sm border border-slate-200">
+                      <div className="flex justify-between items-center border-b border-slate-50 pb-2 mb-2">
+                        <div className="flex items-center gap-2 font-black text-slate-800 text-sm"><Calendar size={14} className="text-indigo-500"/> {record.date} {record.shift}</div>
+                        <div className="flex gap-1.5">
+                          {recordTaskTotal > 0 && (
+                            <span className={`${recordTaskDone === recordTaskTotal ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'} px-2 py-0.5 rounded text-[10px] font-bold`}>常規 {recordTaskDone}/{recordTaskTotal}</span>
+                          )}
+                          {record.isBalanced ? <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded text-[10px] font-bold">平帳</span> : <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded text-[10px] font-bold">異常</span>}
+                        </div>
+                      </div>
+                      <div className="flex justify-between items-center gap-2">
+                        <div className="text-xs text-slate-600 flex items-center gap-1 font-medium"><User size={12}/> {record.staff}</div>
+                        <div className="flex gap-2 flex-wrap justify-end">
+                          {canManageRecord ? (
+                            <>
+                              <button onClick={() => startEditRecord(record)} className="text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors">
+                                <Edit3 size={12}/> 修改
+                              </button>
+                              <button onClick={() => handleDeleteRecord(record)} className="text-rose-600 bg-rose-50 hover:bg-rose-100 px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors">
+                                <Trash2 size={12}/> 刪除
+                              </button>
+                            </>
+                          ) : (<span className="text-[10px] text-slate-400 px-2 py-1.5">限本人修改/刪除</span>)}
+                          <button onClick={() => setViewingSummary(record)} className="text-white bg-slate-800 hover:bg-slate-700 px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1"><FileText size={12}/> 總表</button>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -733,6 +857,26 @@ export default function App() {
         {/* ================= 模式 3：設定 ================= */}
         {activeTab === 'edit' && (
           <div className="space-y-4 px-4 pt-4 animate-in fade-in duration-300">
+            <div className="bg-indigo-50 border border-indigo-200 p-4 rounded-xl">
+              <h2 className="text-indigo-800 font-bold flex items-center gap-2 text-sm"><User size={16}/> 我的登入頭像</h2>
+              <div className="flex items-center gap-3 mt-3">
+                <AvatarView avatar={currentUser.avatar} className="w-14 h-14 rounded-full bg-white border border-indigo-200 flex items-center justify-center text-2xl shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-black text-slate-800 truncate">{currentUser.name}</p>
+                  <p className="text-[11px] text-indigo-700/80">可改用內建圖示，或上傳自己的照片。</p>
+                </div>
+              </div>
+              <div className="flex gap-2 overflow-x-auto mt-3 pb-1 scrollbar-hide">
+                {['👩‍⚕️', '👨‍⚕️', '🐻', '🐰', '🐱', '🐶', '🐼', '🦊', '🐸', '🐯'].map(av => (
+                  <button key={av} type="button" onClick={() => updateCurrentAvatar(av)} className="text-xl p-2 rounded-full bg-white border border-indigo-100 shrink-0 active:scale-95">{av}</button>
+                ))}
+              </div>
+              <label className="mt-3 w-full bg-white border border-indigo-100 text-indigo-700 py-2.5 rounded-xl text-sm font-bold flex items-center justify-center gap-2 active:scale-95">
+                <ImagePlus size={16}/> 上傳自己的照片
+                <input type="file" accept="image/*" className="hidden" onChange={e => handleAvatarFile(e.target.files?.[0], updateCurrentAvatar)} />
+              </label>
+            </div>
+
             <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl">
               <h2 className="text-amber-800 font-bold flex items-center gap-2 text-sm"><Settings size={16}/> 單位表單設定</h2>
               <p className="text-xs text-amber-700/80 mt-1">您可以隨時調整各區域的標準數量，或新增/刪除物品。</p>
@@ -758,6 +902,18 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {activeTab === 'handover' && (
+        <div className="category-quick-nav bg-white/95 backdrop-blur-md border-t border-slate-100 px-3 py-2 z-40 shadow-[0_-4px_16px_rgba(15,23,42,0.04)]">
+          <div className="max-w-2xl mx-auto flex overflow-x-auto gap-2 scrollbar-hide">
+            {categories?.map(cat => (
+              <button key={cat.id} onClick={() => handleCategoryChange(cat.id)} className={`shrink-0 px-3 py-2 rounded-full font-bold text-xs transition-all shadow-sm flex items-center gap-1.5 ${activeCategory === cat.id ? 'bg-slate-800 text-white' : 'bg-slate-50 text-slate-600 border border-slate-200'}`}>
+                <CategoryIcon id={cat.id} size={13} />{cat.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* 底部導覽列 */}
       <nav className="bottom-nav bg-white/95 backdrop-blur-md border-t border-slate-200 px-6 z-40 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
