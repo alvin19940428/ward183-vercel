@@ -171,6 +171,16 @@ const deviceStatusOptions = [
 const statusLabel = (status) => deviceStatusOptions.find(option => option.value === status)?.label || '未點';
 const destinationTextFromStaff = (staff) => staff ? `【${staff.name}】${staff.role || '護理師'}` : '';
 
+const splitDestinations = (value) => {
+  if (Array.isArray(value)) return value.map(v => String(v).trim()).filter(Boolean);
+  return String(value || '')
+    .split(/[、,，;；\n]+/)
+    .map(v => v.trim())
+    .filter(Boolean);
+};
+
+const formatDestinations = (values) => splitDestinations(values).join('、');
+
 const CategoryIcon = ({ id, size = 16, className = "" }) => {
   switch(id) {
     case 'med_prep': return <Package size={size} className={className} />;
@@ -369,6 +379,30 @@ export default function App() {
     setCategories(prev => prev.map(cat => cat.id === catId ? {
       ...cat,
       items: cat.items.map(item => item.id === itemId ? { ...item, [field]: value } : item)
+    } : cat));
+  };
+
+
+  const appendTabletDestination = (catId, itemId, destination) => {
+    if (!destination) return;
+    setCategories(prev => prev.map(cat => cat.id === catId ? {
+      ...cat,
+      items: cat.items.map(item => {
+        if (item.id !== itemId) return item;
+        const current = splitDestinations(item.inUseDestination);
+        if (current.includes(destination)) return item;
+        return { ...item, inUseDestination: formatDestinations([...current, destination]) };
+      })
+    } : cat));
+  };
+
+  const removeTabletDestination = (catId, itemId, destination) => {
+    setCategories(prev => prev.map(cat => cat.id === catId ? {
+      ...cat,
+      items: cat.items.map(item => {
+        if (item.id !== itemId) return item;
+        return { ...item, inUseDestination: formatDestinations(splitDestinations(item.inUseDestination).filter(v => v !== destination)) };
+      })
     } : cat));
   };
 
@@ -728,8 +762,11 @@ export default function App() {
           }
         });
       }
-      if (item.tabletMode && (item.inUseCount || 0) > 0 && !item.inUseDestination?.trim()) {
-        issues.push({ key: `${cat.id}__${item.id}__inuse`, catName: cat.name, itemName: item.name, label: `使用中 ${item.inUseCount} 台`, message: '請填寫使用中去向' });
+      if (item.tabletMode && (item.inUseCount || 0) > 0) {
+        const destinations = splitDestinations(item.inUseDestination);
+        if (destinations.length < (item.inUseCount || 0)) {
+          issues.push({ key: `${cat.id}__${item.id}__inuse`, catName: cat.name, itemName: item.name, label: `使用中 ${item.inUseCount} 台`, message: `請至少填寫 ${item.inUseCount} 位使用中去向` });
+        }
       }
     }));
     return issues;
@@ -1530,9 +1567,23 @@ export default function App() {
                           </div>
                           {(item.inUseCount || 0) > 0 && (
                             <div className="space-y-2">
-                              <input type="text" value={item.inUseDestination || ''} onChange={e => setItemField(activeCategory, item.id, 'inUseDestination', e.target.value)} placeholder="使用中去向：【王○○】護理師" className="w-full bg-white border border-indigo-100 rounded-lg px-3 py-2 text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-200" />
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="text-xs font-black text-indigo-800">使用中去向 <span className="text-indigo-500">{splitDestinations(item.inUseDestination).length}/{item.inUseCount}</span></div>
+                                {splitDestinations(item.inUseDestination).length < (item.inUseCount || 0) && <span className="text-[10px] font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full">尚需選擇</span>}
+                              </div>
+                              {splitDestinations(item.inUseDestination).length > 0 && (
+                                <div className="flex flex-wrap gap-1.5">
+                                  {splitDestinations(item.inUseDestination).map(dest => (
+                                    <span key={dest} className="inline-flex items-center gap-1 bg-white border border-indigo-100 text-indigo-700 px-2 py-1 rounded-full text-[11px] font-bold">
+                                      {dest}
+                                      <button type="button" onClick={() => removeTabletDestination(activeCategory, item.id, dest)} className="text-indigo-400 active:scale-90"><X size={12}/></button>
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                              <input type="text" value={item.inUseDestination || ''} onChange={e => setItemField(activeCategory, item.id, 'inUseDestination', e.target.value)} placeholder="可手動輸入，多人請用、分隔" className="w-full bg-white border border-indigo-100 rounded-lg px-3 py-2 text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-200" />
                               <div className="flex overflow-x-auto gap-1.5 scrollbar-hide">
-                                {unitStaff.map(staff => <button key={staff.name} type="button" onClick={() => setItemField(activeCategory, item.id, 'inUseDestination', destinationTextFromStaff(staff))} className="shrink-0 bg-white text-indigo-700 border border-indigo-100 px-2 py-1 rounded-full text-[11px] font-bold">{staff.name}</button>)}
+                                {unitStaff.map(staff => <button key={staff.name} type="button" onClick={() => appendTabletDestination(activeCategory, item.id, destinationTextFromStaff(staff))} className="shrink-0 bg-white text-indigo-700 border border-indigo-100 px-2 py-1 rounded-full text-[11px] font-bold">{staff.name}</button>)}
                               </div>
                             </div>
                           )}
