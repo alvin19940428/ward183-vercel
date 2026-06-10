@@ -378,7 +378,14 @@ export default function App() {
   const setItemField = (catId, itemId, field, value) => {
     setCategories(prev => prev.map(cat => cat.id === catId ? {
       ...cat,
-      items: cat.items.map(item => item.id === itemId ? { ...item, [field]: value } : item)
+      items: cat.items.map(item => {
+        if (item.id !== itemId) return item;
+        if (item.tabletMode && field === 'inUseDestination') {
+          const maxCount = item.inUseCount || 0;
+          return { ...item, inUseDestination: formatDestinations(splitDestinations(value).slice(0, maxCount)) };
+        }
+        return { ...item, [field]: value };
+      })
     } : cat));
   };
 
@@ -390,7 +397,12 @@ export default function App() {
       items: cat.items.map(item => {
         if (item.id !== itemId) return item;
         const current = splitDestinations(item.inUseDestination);
+        const maxCount = item.inUseCount || 0;
         if (current.includes(destination)) return item;
+        if (maxCount > 0 && current.length >= maxCount) {
+          showToast(`⚠️ 使用中為 ${maxCount} 台，已達可選人數上限`);
+          return item;
+        }
         return { ...item, inUseDestination: formatDestinations([...current, destination]) };
       })
     } : cat));
@@ -514,7 +526,11 @@ export default function App() {
       return {
         ...cat, items: cat.items.map(item => {
           if (item.id !== itemId) return item;
-          return { ...item, [field]: Math.max(0, (item[field] || 0) + delta) };
+          const nextValue = Math.max(0, (item[field] || 0) + delta);
+          if (item.tabletMode && field === 'inUseCount') {
+            return { ...item, inUseCount: nextValue, inUseDestination: formatDestinations(splitDestinations(item.inUseDestination).slice(0, nextValue)) };
+          }
+          return { ...item, [field]: nextValue };
         })
       };
     }));
@@ -1569,7 +1585,7 @@ export default function App() {
                             <div className="space-y-2">
                               <div className="flex items-center justify-between gap-2">
                                 <div className="text-xs font-black text-indigo-800">使用中去向 <span className="text-indigo-500">{splitDestinations(item.inUseDestination).length}/{item.inUseCount}</span></div>
-                                {splitDestinations(item.inUseDestination).length < (item.inUseCount || 0) && <span className="text-[10px] font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full">尚需選擇</span>}
+                                {splitDestinations(item.inUseDestination).length < (item.inUseCount || 0) ? <span className="text-[10px] font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full">尚需選擇</span> : <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">人數吻合</span>}
                               </div>
                               {splitDestinations(item.inUseDestination).length > 0 && (
                                 <div className="flex flex-wrap gap-1.5">
@@ -1581,9 +1597,16 @@ export default function App() {
                                   ))}
                                 </div>
                               )}
-                              <input type="text" value={item.inUseDestination || ''} onChange={e => setItemField(activeCategory, item.id, 'inUseDestination', e.target.value)} placeholder="可手動輸入，多人請用、分隔" className="w-full bg-white border border-indigo-100 rounded-lg px-3 py-2 text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-200" />
+                              <input type="text" value={item.inUseDestination || ''} onChange={e => setItemField(activeCategory, item.id, 'inUseDestination', e.target.value)} placeholder={`需填 ${item.inUseCount} 位，多人請用、分隔`} className="w-full bg-white border border-indigo-100 rounded-lg px-3 py-2 text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-200" />
+                              <div className="text-[10px] font-bold text-slate-500">使用中幾台，就需對應幾位去向；達到人數後會停止新增。</div>
                               <div className="flex overflow-x-auto gap-1.5 scrollbar-hide">
-                                {unitStaff.map(staff => <button key={staff.name} type="button" onClick={() => appendTabletDestination(activeCategory, item.id, destinationTextFromStaff(staff))} className="shrink-0 bg-white text-indigo-700 border border-indigo-100 px-2 py-1 rounded-full text-[11px] font-bold">{staff.name}</button>)}
+                                {unitStaff.map(staff => {
+                                  const selectedCount = splitDestinations(item.inUseDestination).length;
+                                  const isFull = selectedCount >= (item.inUseCount || 0);
+                                  const dest = destinationTextFromStaff(staff);
+                                  const selected = splitDestinations(item.inUseDestination).includes(dest);
+                                  return <button key={staff.name} type="button" disabled={isFull && !selected} onClick={() => appendTabletDestination(activeCategory, item.id, dest)} className={`shrink-0 border px-2 py-1 rounded-full text-[11px] font-bold ${selected ? 'bg-indigo-600 text-white border-indigo-600' : isFull ? 'bg-slate-100 text-slate-300 border-slate-100' : 'bg-white text-indigo-700 border-indigo-100'}`}>{staff.name}</button>;
+                                })}
                               </div>
                             </div>
                           )}
