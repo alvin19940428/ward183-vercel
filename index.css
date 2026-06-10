@@ -80,9 +80,10 @@ const shiftTasksConfig = {
 };
 
 const defaultUnitStaff = [
-  { name: '曲帽敏', role: '護理長' },
+  { name: '曲幗敏', role: '護理長' },
   { name: '夏惠珍', role: '副護理長' },
   { name: '朱展儀', role: '職務代理人' },
+  { name: '周裕雯', role: '行政助理' },
   { name: '顧振玲', role: '護理師' },
   { name: '林佳霖', role: '護理師' },
   { name: '張惠雯', role: '護理師' },
@@ -91,17 +92,47 @@ const defaultUnitStaff = [
   { name: '陳勻', role: '護理師' },
   { name: '簡鈺亭', role: '護理師' },
   { name: '彭晨旭', role: '護理師' },
-  { name: '李湘淳', role: '護理師' },
+  { name: '李湘渟', role: '護理師' },
   { name: '蔡雅霓', role: '護理師' },
   { name: '劉致賢', role: '護理師' },
   { name: '鄒雁霖', role: '護理師' },
-  { name: '周裕雯', role: '行政助理' },
-  { name: '劉宸妤', role: '護理師' },
+  { name: '劉宸妡', role: '護理師' },
   { name: '甘玟妤', role: '護理師' },
   { name: '黃家安', role: '護理師' },
   { name: '鄭雅軒', role: '護理師' },
-  { name: '蕭玟好', role: '護理師' },
+  { name: '蕭玟妤', role: '護理師' },
 ];
+
+const staffNameCorrections = {
+  '曲帽敏': '曲幗敏',
+  '陳匀': '陳勻',
+  '李湘淳': '李湘渟',
+  '蔡雅覺': '蔡雅霓',
+  '劉宸妤': '劉宸妡',
+  '蕭玟好': '蕭玟妤',
+};
+
+const normalizeUnitStaff = (staffList) => {
+  const source = Array.isArray(staffList) && staffList.length ? staffList : defaultUnitStaff;
+  const roleByName = Object.fromEntries(defaultUnitStaff.map(s => [s.name, s.role]));
+  const normalized = source.map(person => {
+    const rawName = person?.name || '';
+    const correctedName = staffNameCorrections[rawName] || rawName;
+    return {
+      name: correctedName,
+      role: roleByName[correctedName] || person?.role || '護理師',
+    };
+  }).filter(person => person.name);
+
+  const seen = new Set();
+  const deduped = [];
+  [...normalized, ...defaultUnitStaff].forEach(person => {
+    if (seen.has(person.name)) return;
+    seen.add(person.name);
+    deduped.push(person);
+  });
+  return deduped;
+};
 
 const makeNumberedDevices = (item) => {
   const count = item.deviceCount || item.standard || 0;
@@ -243,7 +274,7 @@ export default function App() {
   const [staffNames, setStaffNames] = useState(() => { try { return JSON.parse(localStorage.getItem('ward183_staff_names')) || []; } catch { return []; } });
   const [authName, setAuthName] = useState('');
   const [authAvatar, setAuthAvatar] = useState('👩‍⚕️'); // 新增頭像狀態
-  const [unitStaff, setUnitStaff] = useState(() => { try { const saved = JSON.parse(localStorage.getItem('ward183_unit_staff')); return Array.isArray(saved) && saved.length ? saved : defaultUnitStaff; } catch { return defaultUnitStaff; } });
+  const [unitStaff, setUnitStaff] = useState(() => { try { const saved = JSON.parse(localStorage.getItem('ward183_unit_staff')); return normalizeUnitStaff(saved); } catch { return normalizeUnitStaff(defaultUnitStaff); } });
   const [staffDraftName, setStaffDraftName] = useState('');
   const [staffDraftRole, setStaffDraftRole] = useState('護理師');
   
