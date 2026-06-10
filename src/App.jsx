@@ -12,6 +12,9 @@ import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 
+const APP_VERSION = 'v14 穩定清理＋狀態追蹤優化版';
+const APP_VERSION_NOTE = '數量吻合與追蹤事項分開顯示、快速帶入與備份功能';
+
 // --- 初始表單資料 (已將冰箱區移至最後) ---
 const initialData = [
   { id: 'med_prep', name: '備藥間', items: [
@@ -449,6 +452,95 @@ export default function App() {
     } : cat));
   };
 
+  const setCategoryToExpected = (catId) => {
+    setCategories(prev => prev.map(cat => {
+      if (cat.id !== catId) return cat;
+      return {
+        ...cat,
+        items: cat.items.map(item => {
+          const expected = Math.max(0, (item.standard || 0) + (item.tempDelta || 0));
+          if (item.numberedMode) {
+            return { ...item, devices: makeNumberedDevices(item).map(device => ({ ...device, status: 'in_stock', destination: '' })) };
+          }
+          if (item.tabletMode) {
+            const crashCartCount = item.hasCrashCart ? 1 : 0;
+            return { ...item, drawerCount: Math.max(0, expected - crashCartCount), crashCartCount, inUseCount: 0, inUseDestination: '', repairCount: 0, missingCount: 0 };
+          }
+          const crashCartCount = item.hasCrashCart ? 1 : 0;
+          const publicCount = Math.max(0, expected - crashCartCount);
+          return { ...item, publicCount, crashCartCount, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [] };
+        })
+      };
+    }));
+    showToast('✅ 本區已快速帶入應點數量，請再確認外借、使用中與床邊物品');
+  };
+
+  const exportBackup = () => {
+    const backup = {
+      version: APP_VERSION,
+      exportedAt: new Date().toISOString(),
+      records,
+      categories,
+      users,
+      staffNames,
+      unitStaff,
+    };
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `183病房點班備份_${getTodayDate()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('✅ 已匯出備份檔');
+  };
+
+  const importBackupFile = async (file) => {
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const backup = JSON.parse(text);
+      if (!Array.isArray(backup.records) || !Array.isArray(backup.categories)) {
+        showToast('❌ 備份檔格式不正確');
+        return;
+      }
+      showConfirm('匯入備份', '匯入後會覆蓋目前本機紀錄與表單狀態，確定要繼續嗎？', () => {
+        setRecords(backup.records || []);
+        setCategories(normalizeCategoriesForV13(backup.categories || initialData));
+        if (Array.isArray(backup.users)) setUsers(backup.users);
+        if (Array.isArray(backup.staffNames)) setStaffNames(backup.staffNames);
+        if (Array.isArray(backup.unitStaff)) setUnitStaff(normalizeUnitStaff(backup.unitStaff));
+        showToast('✅ 備份已匯入');
+      });
+    } catch (e) {
+      console.error(e);
+      showToast('❌ 備份讀取失敗');
+    }
+  };
+
+  const exportRecordsCsv = () => {
+    const rows = [['日期', '班別', '點班者', '數量狀態', '異常數', '追蹤事項', '常規完成', '建立時間']];
+    records.forEach(record => {
+      const taskTotal = record.tasksTotal ?? record.tasks?.length ?? 0;
+      const taskDone = record.tasksCompleted ?? record.tasks?.filter(t => t.done).length ?? 0;
+      const trackingCount = record.trackingIssues?.length || 0;
+      rows.push([
+        record.date || '', record.shift || '', record.staff || '', record.isBalanced ? '平帳' : '異常',
+        record.abnormalCount ?? record.abnormalities?.length ?? 0, trackingCount,
+        taskTotal > 0 ? `${taskDone}/${taskTotal}` : '無', record.timestamp || ''
+      ]);
+    });
+    const csv = rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob([`\ufeff${csv}`], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `183病房點班紀錄_${getTodayDate()}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('✅ 已匯出 CSV');
+  };
+
   const updateSavedUserAvatar = (name, avatar) => {
     setUsers(prev => {
       const exists = prev.some(u => u.name === name);
@@ -784,6 +876,29 @@ export default function App() {
           issues.push({ key: `${cat.id}__${item.id}__inuse`, catName: cat.name, itemName: item.name, label: `使用中 ${item.inUseCount} 台`, message: `請至少填寫 ${item.inUseCount} 位使用中去向` });
         }
       }
+      if (item.hasCrashCart && (item.crashCartCount || 0) <= 0) {
+        issues.push({ key: `${cat.id}__${item.id}__crashcart`, catName: cat.name, itemName: item.name, label: '急救車未確認', message: '請確認急救車位置或填寫異常原因' });
+      }
+    }));
+    return issues;
+  };
+
+  const buildTrackingSnapshot = () => {
+    const issues = [];
+    categories?.forEach(cat => cat.items?.forEach(item => {
+      if (item.numberedMode) {
+        makeNumberedDevices(item).forEach(device => {
+          if (['in_use', 'repair', 'missing'].includes(device.status)) {
+            issues.push({ key: `${cat.id}__${item.id}__device${device.no}`, catName: cat.name, itemName: item.name, label: `${device.label} ${statusLabel(device.status)}`, destination: device.destination || '', message: device.destination ? device.destination : '未填去向' });
+          }
+        });
+      }
+      if (item.tabletMode && (item.inUseCount || 0) > 0) {
+        issues.push({ key: `${cat.id}__${item.id}__tablet`, catName: cat.name, itemName: item.name, label: `使用中 ${item.inUseCount} 台`, destination: item.inUseDestination || '', message: item.inUseDestination || '未填去向' });
+      }
+      if (item.hasCrashCart && (item.crashCartCount || 0) <= 0) {
+        issues.push({ key: `${cat.id}__${item.id}__crashcart`, catName: cat.name, itemName: item.name, label: '急救車未確認', destination: '', message: '急救車位置未確認' });
+      }
     }));
     return issues;
   };
@@ -802,11 +917,12 @@ export default function App() {
     const abnormalItems = review?.abnormalItems || getAbnormalItems();
     const taskSnapshot = buildTaskSnapshot();
     const abnormalSnapshot = buildAbnormalSnapshot(abnormalItems);
+    const trackingSnapshot = buildTrackingSnapshot();
     const recordData = {
       date: currentDate, shift: currentShift, staff: currentUser.name, staffAvatar: currentUser.avatar || '👩‍⚕️',
-      timestamp: new Date().toISOString(), isBalanced: progress.balanced === progress.total, snapshot: categories,
+      timestamp: new Date().toISOString(), isBalanced: progress.balanced === progress.total, hasTracking: trackingSnapshot.length > 0, snapshot: categories,
       tasks: taskSnapshot, tasksCompleted: taskSnapshot.filter(t => t.done).length, tasksTotal: taskSnapshot.length,
-      abnormalities: abnormalSnapshot, abnormalCount: abnormalSnapshot.length, saveVersion: 'v13-fast-tracking'
+      abnormalities: abnormalSnapshot, abnormalCount: abnormalSnapshot.length, trackingIssues: trackingSnapshot, trackingCount: trackingSnapshot.length, saveVersion: APP_VERSION
     };
     try {
       if (targetRecordId && !forceNew) {
@@ -917,6 +1033,7 @@ export default function App() {
     if (!record) return '';
     const abnormalities = getRecordAbnormalItems(record);
     const unfinishedTasks = (record.tasks || []).filter(task => !task.done);
+    const trackingIssues = record.trackingIssues || [];
     const taskTotal = record.tasksTotal ?? record.tasks?.length ?? 0;
     const taskDone = record.tasksCompleted ?? record.tasks?.filter(task => task.done).length ?? 0;
     const followUpLines = [];
@@ -932,10 +1049,16 @@ export default function App() {
       followUpLines.push(`- 常規未完成：${task.label}${noteText}`);
     });
 
+    trackingIssues.forEach(issue => {
+      const destination = issue.destination || issue.message || '';
+      followUpLines.push(`- 追蹤：${issue.itemName || ''} ${issue.label || ''}${destination ? `，${destination}` : ''}`);
+    });
+
     return [
       `183病房 ${record.date} ${record.shift} 點班摘要`,
       `點班者：${record.staff || '-'}`,
-      `物品狀態：${record.isBalanced ? '平帳' : `異常 ${abnormalities.length} 項`}`,
+      `物品狀態：${record.isBalanced ? '數量吻合' : `數量異常 ${abnormalities.length} 項`}`,
+      `追蹤事項：${trackingIssues.length} 項`,
       `護理常規：${taskTotal > 0 ? `${taskDone}/${taskTotal}` : '無班別常規'}`,
       '',
       '待追蹤：',
@@ -1213,6 +1336,7 @@ export default function App() {
             <p className="text-indigo-100 font-medium text-sm flex items-center justify-center gap-1">
                <CheckCircle2 size={14}/> {isFirebaseEnabled ? '雲端同步就緒' : '單機模式 (未連線)'}
             </p>
+            <p className="text-[11px] text-indigo-100/80 mt-2 font-bold">{APP_VERSION}</p>
           </div>
           <div className="p-6">
             <form onSubmit={handleAuthSubmit} className="space-y-4">
@@ -1327,7 +1451,7 @@ export default function App() {
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <h3 className="text-lg font-black text-slate-800 flex items-center gap-2"><AlertTriangle size={20} className="text-amber-500"/> 儲存前確認</h3>
-                  <p className="text-xs text-slate-500 mt-1 leading-relaxed">v7 會防止同日同班重複建立，並把異常原因與常規未完成原因一起存入紀錄。</p>
+                  <p className="text-xs text-slate-500 mt-1 leading-relaxed">v14 會防止同日同班重複建立，並把數量異常、常規未完成與追蹤事項一起存入紀錄。</p>
                 </div>
                 <button onClick={() => setSaveReview(null)} className="p-2 text-slate-400 hover:text-slate-700"><X size={18}/></button>
               </div>
@@ -1372,7 +1496,22 @@ export default function App() {
                 </div>
               )}
 
-              {!saveReview.duplicateRecord && saveReview.abnormalItems?.length === 0 && saveReview.unfinishedTasks?.length === 0 && (
+              {saveReview.trackingIssues?.length > 0 && (
+                <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-4">
+                  <div className="font-black text-indigo-800 text-sm mb-2 flex items-center gap-1"><MapPin size={15}/> 追蹤事項確認</div>
+                  <div className="space-y-2">
+                    {saveReview.trackingIssues.map(issue => (
+                      <div key={issue.key} className="bg-white/70 rounded-xl p-3 border border-indigo-100 text-xs">
+                        <div className="font-black text-slate-800">{issue.catName} / {issue.itemName} / {issue.label}</div>
+                        <div className="text-indigo-700 font-bold mt-1">{issue.message}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="text-[11px] text-indigo-700/80 mt-2 leading-relaxed">請回到物品卡片補齊去向，或在異常原因中說明處理狀態。</div>
+                </div>
+              )}
+
+              {!saveReview.duplicateRecord && saveReview.abnormalItems?.length === 0 && saveReview.unfinishedTasks?.length === 0 && saveReview.trackingIssues?.length === 0 && (
                 <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 text-sm font-bold text-emerald-700">所有項目皆正常，可以儲存。</div>
               )}
             </div>
@@ -1494,6 +1633,14 @@ export default function App() {
                 </div>
               )}
 
+              <div className="bg-white border border-slate-200 rounded-2xl p-3 shadow-sm flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-sm font-black text-slate-800 flex items-center gap-1"><CheckCircle2 size={15} className="text-emerald-500"/> 本區快速完成</div>
+                  <div className="text-[11px] text-slate-500 mt-0.5">先帶入「{currentCategoryObj?.name}」應點數量，再個別修正使用中、床邊或借出。</div>
+                </div>
+                <button type="button" onClick={() => setCategoryToExpected(activeCategory)} className="shrink-0 bg-emerald-600 text-white px-3 py-2 rounded-xl text-xs font-black active:scale-95">本區設為應點</button>
+              </div>
+
               {/* 護理常規待辦 */}
               {activeShiftTasks.length > 0 && (
                 <div ref={taskListRef} className="bg-amber-50 border border-amber-200 rounded-2xl p-4 shadow-sm scroll-mt-56">
@@ -1542,6 +1689,16 @@ export default function App() {
                           {isBalanced ? 'OK' : (diff > 0 ? `多 ${diff}` : `少 ${Math.abs(diff)}`)}
                         </div>
                       </div>
+
+                      {item.hasCrashCart && (item.crashCartCount || 0) <= 0 && (
+                        <div className="bg-amber-50 border border-amber-100 text-amber-700 rounded-xl px-3 py-2 text-xs font-black flex items-center gap-1"><AlertTriangle size={14}/> 急救車尚未確認</div>
+                      )}
+                      {item.tabletMode && (item.inUseCount || 0) > 0 && splitDestinations(item.inUseDestination).length < (item.inUseCount || 0) && (
+                        <div className="bg-rose-50 border border-rose-100 text-rose-700 rounded-xl px-3 py-2 text-xs font-black flex items-center gap-1"><AlertTriangle size={14}/> 使用中去向尚缺 {(item.inUseCount || 0) - splitDestinations(item.inUseDestination).length} 位</div>
+                      )}
+                      {item.numberedMode && makeNumberedDevices(item).some(device => ['in_use', 'repair', 'missing'].includes(device.status) && !device.destination?.trim()) && (
+                        <div className="bg-rose-50 border border-rose-100 text-rose-700 rounded-xl px-3 py-2 text-xs font-black flex items-center gap-1"><AlertTriangle size={14}/> 有編號設備尚未填寫去向／最後確認</div>
+                      )}
                       
                       {item.numberedMode ? (
                         <div className="bg-indigo-50 p-3 rounded-xl border border-indigo-100 space-y-3">
@@ -1693,7 +1850,7 @@ export default function App() {
               <div className="flex justify-between items-start gap-3">
                 <div>
                   <h2 className="text-blue-800 font-bold flex items-center gap-2 text-sm"><History size={16}/> 歷史紀錄</h2>
-                  <p className="text-[10px] text-blue-600 mt-1">保存最新 100 筆紀錄，點選可產生圖檔報表。v13 快速點班與去向追蹤版</p>
+                  <p className="text-[10px] text-blue-600 mt-1">保存最新 100 筆紀錄，點選可產生圖檔報表。{APP_VERSION}</p>
                 </div>
                 <span className="bg-white text-blue-700 border border-blue-100 px-3 py-1 rounded-full text-xs font-black shrink-0">共 {filteredRecords.length} 筆</span>
               </div>
@@ -1753,6 +1910,7 @@ export default function App() {
                   const canManageRecord = record.staff === currentUser.name;
                   const abnormalNoteCount = record.abnormalities?.filter(item => item.note)?.length || 0;
                   const taskNoteCount = record.tasks?.filter(task => !task.done && task.note)?.length || 0;
+                  const recordTrackingCount = record.trackingCount ?? record.trackingIssues?.length ?? 0;
                   return (
                     <div key={record.fbId || record.id} className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
                       <div className="flex items-start gap-3">
@@ -1767,8 +1925,9 @@ export default function App() {
                               {recordTaskTotal > 0 && (
                                 <span className={`${recordTaskDone === recordTaskTotal ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'} px-2 py-0.5 rounded text-[10px] font-bold`}>常規 {recordTaskDone}/{recordTaskTotal}</span>
                               )}
+                              {recordTrackingCount > 0 && <span className="bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded text-[10px] font-bold">追蹤 {recordTrackingCount}</span>}
                               {(abnormalNoteCount > 0 || taskNoteCount > 0) && <span className="bg-slate-100 text-slate-600 px-2 py-0.5 rounded text-[10px] font-bold">備註 {abnormalNoteCount + taskNoteCount}</span>}
-                              {record.isBalanced ? <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded text-[10px] font-bold">平帳</span> : <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded text-[10px] font-bold">異常</span>}
+                              {record.isBalanced ? <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded text-[10px] font-bold">數量吻合</span> : <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded text-[10px] font-bold">數量異常</span>}
                             </div>
                           </div>
                           <div className="flex gap-2 flex-wrap justify-end">
@@ -1802,7 +1961,7 @@ export default function App() {
               <div className="flex justify-between items-start gap-3">
                 <div>
                   <h2 className="text-violet-800 font-bold flex items-center gap-2 text-sm"><BarChart3 size={16}/> 月統計與異常排行榜</h2>
-                  <p className="text-[10px] text-violet-600 mt-1">依本機歷史紀錄統計，協助找出常見異常與追蹤重點。v13 快速點班與去向追蹤版</p>
+                  <p className="text-[10px] text-violet-600 mt-1">依本機歷史紀錄統計，協助找出常見異常與追蹤重點。{APP_VERSION}</p>
                 </div>
                 <button onClick={copyMonthlyStatsSummary} className="bg-white text-violet-700 border border-violet-100 px-3 py-1.5 rounded-full text-xs font-black shrink-0 flex items-center gap-1 active:scale-95">
                   <ClipboardList size={12}/> 複製
@@ -1944,6 +2103,20 @@ export default function App() {
                 <ImagePlus size={16}/> 上傳自己的照片
                 <input type="file" accept="image/*" className="hidden" onChange={e => handleAvatarFile(e.target.files?.[0], updateCurrentAvatar)} />
               </label>
+            </div>
+
+            <div className="bg-slate-50 border border-slate-200 p-4 rounded-xl shadow-sm">
+              <h2 className="text-slate-800 font-bold flex items-center gap-2 text-sm"><DownloadCloud size={16}/> 資料備份與版本</h2>
+              <p className="text-xs text-slate-500 mt-1">目前版本：{APP_VERSION}。資料仍以本機瀏覽器儲存，建議定期匯出備份。</p>
+              <div className="grid grid-cols-2 gap-2 mt-3">
+                <button type="button" onClick={exportBackup} className="bg-slate-800 text-white py-2.5 rounded-xl text-xs font-black active:scale-95">匯出備份 JSON</button>
+                <label className="bg-white text-slate-700 border border-slate-200 py-2.5 rounded-xl text-xs font-black flex items-center justify-center active:scale-95">
+                  匯入備份 JSON
+                  <input type="file" accept="application/json,.json" className="hidden" onChange={e => importBackupFile(e.target.files?.[0])} />
+                </label>
+                <button type="button" onClick={exportRecordsCsv} className="col-span-2 bg-emerald-50 text-emerald-700 border border-emerald-100 py-2.5 rounded-xl text-xs font-black active:scale-95">匯出歷史紀錄 CSV</button>
+              </div>
+              <div className="text-[11px] text-slate-400 mt-2">{APP_VERSION_NOTE}</div>
             </div>
 
             <div className="bg-white border border-indigo-100 p-4 rounded-xl shadow-sm">
