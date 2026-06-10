@@ -6,7 +6,7 @@ import {
   BatteryFull, BatteryWarning, Wind, CheckSquare, Snowflake, 
   Stethoscope, Layers, Activity, Monitor, Move, AlertTriangle,
   LogOut, Settings, DownloadCloud, Edit3, Printer, ClipboardList, PlusCircle, ImagePlus,
-  BarChart3, Trophy, TrendingUp
+  BarChart3, Trophy, TrendingUp, Smartphone, Tablet, Users, MapPin
 } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
@@ -28,19 +28,19 @@ const initialData = [
       { id: 'm11', name: 'Doppler', standard: 1, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [], hideDisinfect: true },
   ]},
   { id: 'treatment', name: '治療間', items: [
-      { id: 't1', name: 'Suction(含急救車)', standard: 10, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [] },
+      { id: 't1', name: '抽吸負壓錶', standard: 10, publicCount: 0, crashCartCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [], hasCrashCart: true },
       { id: 't2', name: '胃減壓器', standard: 2, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [] },
       { id: 't3', name: 'E.S.', standard: 1, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [] },
       { id: 't4', name: '胸瓶架', standard: 5, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [] },
       { id: 't5', name: '深彎', standard: 2, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [], hideRepair: true },
   ]},
   { id: 'station', name: '護理站', items: [
-      { id: 's1', name: '公務手機', standard: 7, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [], hideDisinfect: true },
-      { id: 's2', name: '平板+筆', standard: 5, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [], hideDisinfect: true },
+      { id: 's1', name: '公務手機', standard: 7, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [], hideDisinfect: true, noBeds: true, numberedMode: true, devicePrefix: '手機', deviceCount: 7 },
+      { id: 's2', name: '平板+筆', standard: 5, publicCount: 0, drawerCount: 0, crashCartCount: 0, inUseCount: 0, inUseDestination: '', disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [], hideDisinfect: true, noBeds: true, tabletMode: true, hasCrashCart: true },
       { id: 's3', name: '耳溫槍', standard: 8, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [], hideDisinfect: true },
       { id: 's4', name: '直立血壓機', standard: 8, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [], hideDisinfect: true },
       { id: 's5', name: '手持歐姆龍', standard: 4, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [], hideDisinfect: true },
-      { id: 's6', name: '攜帶式血氧機', standard: 3, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [], hideDisinfect: true },
+      { id: 's6', name: '攜帶式血氧機', standard: 3, publicCount: 0, crashCartCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [], hideDisinfect: true, noBeds: true, hasCrashCart: true },
   ]},
   { id: 'linen', name: '被服間', items: [
       { id: 'l1', name: '脂肪墊 大', standard: 1, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [], hideRepair: true },
@@ -53,7 +53,7 @@ const initialData = [
   { id: 'equipment', name: '儀器間', items: [
       { id: 'e1', name: '腳踏器', standard: 6, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [] },
       { id: 'e2', name: '膝CPM', standard: 6, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [] },
-      { id: 'e3', name: 'IV幫浦+架', standard: 1, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [] },
+      { id: 'e3', name: 'IV幫浦+架', standard: 1, publicCount: 0, tempDelta: 0, tempNote: '', disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [], allowTempAdjust: true },
       { id: 'e4', name: '紅外線烤燈', standard: 1, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [] },
       { id: 'e5', name: '床磅', standard: 1, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, beds: [] },
   ]},
@@ -78,6 +78,98 @@ const shiftTasksConfig = {
   ],
   '小夜': [], '大夜': []
 };
+
+const defaultUnitStaff = [
+  { name: '曲幗敏', role: '護理長' },
+  { name: '夏惠珍', role: '副護理長' },
+  { name: '朱展儀', role: '職務代理人' },
+  { name: '周裕雯', role: '行政助理' },
+  { name: '顧振玲', role: '護理師' },
+  { name: '林佳霖', role: '護理師' },
+  { name: '張惠雯', role: '護理師' },
+  { name: '林可薇', role: '護理師' },
+  { name: '張雅婷', role: '護理師' },
+  { name: '陳勻', role: '護理師' },
+  { name: '簡鈺亭', role: '護理師' },
+  { name: '彭晨旭', role: '護理師' },
+  { name: '李湘渟', role: '護理師' },
+  { name: '蔡雅霓', role: '護理師' },
+  { name: '劉致賢', role: '護理師' },
+  { name: '鄒雁霖', role: '護理師' },
+  { name: '劉宸妡', role: '護理師' },
+  { name: '甘玟妤', role: '護理師' },
+  { name: '黃家安', role: '護理師' },
+  { name: '鄭雅軒', role: '護理師' },
+  { name: '蕭玟妤', role: '護理師' },
+];
+
+const staffNameCorrections = {
+  '曲帽敏': '曲幗敏',
+  '陳匀': '陳勻',
+  '李湘淳': '李湘渟',
+  '蔡雅覺': '蔡雅霓',
+  '劉宸妤': '劉宸妡',
+  '蕭玟好': '蕭玟妤',
+};
+
+const normalizeUnitStaff = (staffList) => {
+  const source = Array.isArray(staffList) && staffList.length ? staffList : defaultUnitStaff;
+  const roleByName = Object.fromEntries(defaultUnitStaff.map(s => [s.name, s.role]));
+  const normalized = source.map(person => {
+    const rawName = person?.name || '';
+    const correctedName = staffNameCorrections[rawName] || rawName;
+    return {
+      name: correctedName,
+      role: roleByName[correctedName] || person?.role || '護理師',
+    };
+  }).filter(person => person.name);
+
+  const seen = new Set();
+  const deduped = [];
+  [...normalized, ...defaultUnitStaff].forEach(person => {
+    if (seen.has(person.name)) return;
+    seen.add(person.name);
+    deduped.push(person);
+  });
+  return deduped;
+};
+
+const makeNumberedDevices = (item) => {
+  const count = item.deviceCount || item.standard || 0;
+  const prefix = item.devicePrefix || '設備';
+  const existing = Array.isArray(item.devices) ? item.devices : [];
+  return Array.from({ length: count }, (_, idx) => {
+    const no = idx + 1;
+    const saved = existing[idx] || existing.find(d => Number(d.no) === no) || {};
+    return { no, label: saved.label || `${prefix}${no}`, status: saved.status || 'unchecked', destination: saved.destination || '' };
+  });
+};
+
+const normalizeCategoriesForV13 = (data) => (Array.isArray(data) ? data : initialData).map(cat => ({
+  ...cat,
+  items: (cat.items || []).map(item => {
+    let next = { ...item };
+    if (next.id === 't1') next = { ...next, name: '抽吸負壓錶', hasCrashCart: true, crashCartCount: next.crashCartCount || 0 };
+    if (next.id === 's1') next = { ...next, noBeds: true, numberedMode: true, devicePrefix: '手機', deviceCount: 7, devices: makeNumberedDevices({ ...next, devicePrefix: '手機', deviceCount: 7 }) };
+    if (next.id === 's2') next = { ...next, noBeds: true, tabletMode: true, hasCrashCart: true, drawerCount: next.drawerCount || 0, crashCartCount: next.crashCartCount || 0, inUseCount: next.inUseCount || 0, inUseDestination: next.inUseDestination || '' };
+    if (next.id === 's6') next = { ...next, noBeds: true, hasCrashCart: true, crashCartCount: next.crashCartCount || 0 };
+    if (next.id === 'e3') next = { ...next, allowTempAdjust: true, tempDelta: next.tempDelta || 0, tempNote: next.tempNote || '' };
+    if (next.hasCrashCart) next.crashCartCount = next.crashCartCount || 0;
+    if (next.numberedMode) next.devices = makeNumberedDevices(next);
+    return next;
+  })
+}));
+
+const deviceStatusOptions = [
+  { value: 'unchecked', label: '未點' },
+  { value: 'in_stock', label: '在庫' },
+  { value: 'in_use', label: '使用中' },
+  { value: 'repair', label: '維修' },
+  { value: 'missing', label: '遺失' },
+];
+
+const statusLabel = (status) => deviceStatusOptions.find(option => option.value === status)?.label || '未點';
+const destinationTextFromStaff = (staff) => staff ? `【${staff.name}】${staff.role || '護理師'}` : '';
 
 const CategoryIcon = ({ id, size = 16, className = "" }) => {
   switch(id) {
@@ -175,13 +267,16 @@ export default function App() {
   const [fbUser, setFbUser] = useState(null);
   const [users, setUsers] = useState(() => { try { return JSON.parse(localStorage.getItem('ward183_local_users')) || []; } catch { return []; } });
   const [records, setRecords] = useState(() => { try { return JSON.parse(localStorage.getItem('ward183_local_records')) || []; } catch { return []; } });
-  const [categories, setCategories] = useState(() => { try { return JSON.parse(localStorage.getItem('ward183_local_live')) || initialData; } catch { return initialData; } });
+  const [categories, setCategories] = useState(() => { try { return normalizeCategoriesForV13(JSON.parse(localStorage.getItem('ward183_local_live')) || initialData); } catch { return normalizeCategoriesForV13(initialData); } });
   
   // 帳號狀態 (極簡版)
   const [currentUser, setCurrentUser] = useState(() => { try { return JSON.parse(localStorage.getItem('ward183_current_user')) || null; } catch { return null; } });
   const [staffNames, setStaffNames] = useState(() => { try { return JSON.parse(localStorage.getItem('ward183_staff_names')) || []; } catch { return []; } });
   const [authName, setAuthName] = useState('');
   const [authAvatar, setAuthAvatar] = useState('👩‍⚕️'); // 新增頭像狀態
+  const [unitStaff, setUnitStaff] = useState(() => { try { const saved = JSON.parse(localStorage.getItem('ward183_unit_staff')); return normalizeUnitStaff(saved); } catch { return normalizeUnitStaff(defaultUnitStaff); } });
+  const [staffDraftName, setStaffDraftName] = useState('');
+  const [staffDraftRole, setStaffDraftRole] = useState('護理師');
   
   // 操作狀態
   const [tasksDone, setTasksDone] = useState({});
@@ -238,6 +333,7 @@ export default function App() {
   useEffect(() => { localStorage.setItem('ward183_current_user', JSON.stringify(currentUser)); }, [currentUser]);
   useEffect(() => { localStorage.setItem('ward183_local_users', JSON.stringify(users)); }, [users]);
   useEffect(() => { localStorage.setItem('ward183_staff_names', JSON.stringify(staffNames)); }, [staffNames]);
+  useEffect(() => { localStorage.setItem('ward183_unit_staff', JSON.stringify(unitStaff)); }, [unitStaff]);
   useEffect(() => { localStorage.setItem('ward183_local_records', JSON.stringify(records)); }, [records]);
   useEffect(() => { localStorage.setItem('ward183_local_live', JSON.stringify(categories)); }, [categories]);
   useEffect(() => {
@@ -254,6 +350,58 @@ export default function App() {
 
   const showToast = (msg) => { setToastMsg(msg); setTimeout(() => setToastMsg(null), 3000); };
   const showConfirm = (title, message, onConfirm) => { setConfirmDialog({ title, message, onConfirm }); };
+
+  const addUnitStaff = () => {
+    const name = staffDraftName.trim();
+    if (!name) return showToast('⚠️ 請先輸入人員姓名');
+    if (unitStaff.some(staff => staff.name === name)) return showToast('⚠️ 名單中已有人員');
+    setUnitStaff(prev => [...prev, { name, role: staffDraftRole || '護理師' }]);
+    setStaffDraftName('');
+    setStaffDraftRole('護理師');
+    showToast('✅ 已新增單位人員');
+  };
+
+  const removeUnitStaff = (name) => {
+    showConfirm('移除人員', `確定要從常用名單移除「${name}」嗎？`, () => setUnitStaff(prev => prev.filter(staff => staff.name !== name)));
+  };
+
+  const setItemField = (catId, itemId, field, value) => {
+    setCategories(prev => prev.map(cat => cat.id === catId ? {
+      ...cat,
+      items: cat.items.map(item => item.id === itemId ? { ...item, [field]: value } : item)
+    } : cat));
+  };
+
+  const updateDevice = (catId, itemId, deviceNo, patch) => {
+    setCategories(prev => prev.map(cat => cat.id === catId ? {
+      ...cat,
+      items: cat.items.map(item => {
+        if (item.id !== itemId) return item;
+        const devices = makeNumberedDevices(item).map(device => device.no === deviceNo ? { ...device, ...patch } : device);
+        return { ...item, devices };
+      })
+    } : cat));
+  };
+
+  const markAllDevicesInStock = (catId, itemId) => {
+    setCategories(prev => prev.map(cat => cat.id === catId ? {
+      ...cat,
+      items: cat.items.map(item => item.id === itemId ? { ...item, devices: makeNumberedDevices(item).map(device => ({ ...device, status: 'in_stock', destination: '' })) } : item)
+    } : cat));
+    showToast('✅ 已將編號設備設為在庫');
+  };
+
+  const setPublicToExpected = (catId, itemId) => {
+    setCategories(prev => prev.map(cat => cat.id === catId ? {
+      ...cat,
+      items: cat.items.map(item => {
+        if (item.id !== itemId) return item;
+        const expected = Math.max(0, (item.standard || 0) + (item.tempDelta || 0));
+        const others = (item.disinfectCount || 0) + (item.repairCount || 0) + (item.missingCount || 0) + (item.beds?.length || 0) + (item.crashCartCount || 0);
+        return { ...item, publicCount: Math.max(0, expected - others) };
+      })
+    } : cat));
+  };
 
   const updateSavedUserAvatar = (name, avatar) => {
     setUsers(prev => {
@@ -357,7 +505,7 @@ export default function App() {
     showConfirm('全部歸零', '確定要清空目前進度重新點班嗎？\n(系統將自動為您帶入上一班的床位紀錄)', () => {
       // 保持目前的表單設定架構 (standard 數量等)，只清空計數
       let newCats = categories.map(cat => ({ 
-        ...cat, items: cat.items.map(item => ({ ...item, publicCount: 0, disinfectCount: 0, repairCount: 0, missingCount: 0, fullCount: 0, emptyCount: 0, beds: [] })) 
+        ...cat, items: cat.items.map(item => ({ ...item, publicCount: 0, drawerCount: 0, crashCartCount: 0, inUseCount: 0, inUseDestination: '', disinfectCount: 0, repairCount: 0, missingCount: 0, fullCount: 0, emptyCount: 0, beds: [], devices: item.numberedMode ? makeNumberedDevices(item).map(device => ({ ...device, status: 'unchecked', destination: '' })) : item.devices })) 
       }));
       
       // 自動繼承上一筆紀錄的床位
@@ -391,12 +539,17 @@ export default function App() {
   };
 
   // --- 計算與儲存 ---
-  const getTotal = (item) => (item.publicCount || 0) + (item.disinfectCount || 0) + (item.repairCount || 0) + (item.missingCount || 0) + (item.beds?.length || 0);
+  const getExpected = (item) => Math.max(0, (item.standard || 0) + (item.tempDelta || 0));
+  const getTotal = (item) => {
+    if (item.numberedMode) return makeNumberedDevices(item).filter(device => device.status !== 'unchecked').length;
+    if (item.tabletMode) return (item.drawerCount || 0) + (item.crashCartCount || 0) + (item.inUseCount || 0) + (item.repairCount || 0) + (item.missingCount || 0);
+    return (item.publicCount || 0) + (item.crashCartCount || 0) + (item.disinfectCount || 0) + (item.repairCount || 0) + (item.missingCount || 0) + (item.beds?.length || 0);
+  };
   
   const progress = useMemo(() => {
     let totalItems = 0, balancedItems = 0;
     categories?.forEach(cat => cat.items?.forEach(item => {
-      totalItems++; if (getTotal(item) === item.standard) balancedItems++;
+      totalItems++; if (getTotal(item) === getExpected(item)) balancedItems++;
     }));
     return { total: totalItems, balanced: balancedItems };
   }, [categories]);
@@ -486,11 +639,11 @@ export default function App() {
     const items = [];
     record.snapshot?.forEach(cat => cat.items?.forEach(item => {
       const total = getTotal(item);
-      if (total !== item.standard) {
+      if (total !== getExpected(item)) {
         items.push({
           key: getItemKey(cat.id, item.id),
           catId: cat.id, itemId: item.id, catName: cat.name, itemName: item.name,
-          standard: item.standard, total, diff: total - item.standard, note: ''
+          standard: getExpected(item), baseStandard: item.standard, total, diff: total - getExpected(item), note: ''
         });
       }
     }));
@@ -538,11 +691,11 @@ export default function App() {
     const items = [];
     categories?.forEach(cat => cat.items?.forEach(item => {
       const total = getTotal(item);
-      if (total !== item.standard) {
+      if (total !== getExpected(item)) {
         items.push({
           key: getItemKey(cat.id, item.id),
           catId: cat.id, itemId: item.id, catName: cat.name, itemName: item.name,
-          standard: item.standard, total, diff: total - item.standard
+          standard: getExpected(item), baseStandard: item.standard, total, diff: total - getExpected(item)
         });
       }
     }));
@@ -565,11 +718,28 @@ export default function App() {
     note: abnormalNotes[item.key]?.trim() || ''
   }));
 
-  const validateSaveNotes = (abnormalItems, unfinishedTasks) => {
+  const getTrackingIssues = () => {
+    const issues = [];
+    categories?.forEach(cat => cat.items?.forEach(item => {
+      if (item.numberedMode) {
+        makeNumberedDevices(item).forEach(device => {
+          if (['in_use', 'repair', 'missing'].includes(device.status) && !device.destination?.trim()) {
+            issues.push({ key: `${cat.id}__${item.id}__device${device.no}`, catName: cat.name, itemName: item.name, label: `${device.label} ${statusLabel(device.status)}`, message: '請填寫去向／最後確認' });
+          }
+        });
+      }
+      if (item.tabletMode && (item.inUseCount || 0) > 0 && !item.inUseDestination?.trim()) {
+        issues.push({ key: `${cat.id}__${item.id}__inuse`, catName: cat.name, itemName: item.name, label: `使用中 ${item.inUseCount} 台`, message: '請填寫使用中去向' });
+      }
+    }));
+    return issues;
+  };
+
+  const validateSaveNotes = (abnormalItems, unfinishedTasks, trackingIssues = []) => {
     const missingAbnormalNotes = abnormalItems.filter(item => !abnormalNotes[item.key]?.trim());
     const missingTaskNotes = unfinishedTasks.filter(task => !taskNotes[task.id]?.trim());
-    if (missingAbnormalNotes.length > 0 || missingTaskNotes.length > 0) {
-      showToast('⚠️ 請先填寫異常原因或常規未完成原因');
+    if (missingAbnormalNotes.length > 0 || missingTaskNotes.length > 0 || trackingIssues.length > 0) {
+      showToast('⚠️ 請先填寫異常原因、常規未完成原因，或使用中去向');
       return false;
     }
     return true;
@@ -583,7 +753,7 @@ export default function App() {
       date: currentDate, shift: currentShift, staff: currentUser.name, staffAvatar: currentUser.avatar || '👩‍⚕️',
       timestamp: new Date().toISOString(), isBalanced: progress.balanced === progress.total, snapshot: categories,
       tasks: taskSnapshot, tasksCompleted: taskSnapshot.filter(t => t.done).length, tasksTotal: taskSnapshot.length,
-      abnormalities: abnormalSnapshot, abnormalCount: abnormalSnapshot.length, saveVersion: 'v11-monthly-stats'
+      abnormalities: abnormalSnapshot, abnormalCount: abnormalSnapshot.length, saveVersion: 'v13-fast-tracking'
     };
     try {
       if (targetRecordId && !forceNew) {
@@ -606,19 +776,20 @@ export default function App() {
     const abnormalItems = getAbnormalItems();
     const unfinishedTasks = activeShiftTasks.filter(task => !tasksDone[task.id]);
     const duplicateRecord = !editingRecordId ? getDuplicateRecord() : null;
-    const needsReview = duplicateRecord || abnormalItems.length > 0 || unfinishedTasks.length > 0;
+    const trackingIssues = getTrackingIssues();
+    const needsReview = duplicateRecord || abnormalItems.length > 0 || unfinishedTasks.length > 0 || trackingIssues.length > 0;
     if (!needsReview) {
-      executeSaveRecord({ forceNew: false, review: { abnormalItems, unfinishedTasks, duplicateRecord } });
+      executeSaveRecord({ forceNew: false, review: { abnormalItems, unfinishedTasks, duplicateRecord, trackingIssues } });
       return;
     }
-    setSaveReview({ abnormalItems, unfinishedTasks, duplicateRecord });
+    setSaveReview({ abnormalItems, unfinishedTasks, duplicateRecord, trackingIssues });
   };
 
   const confirmSaveFromReview = (mode = 'save') => {
     if (!saveReview) return;
     const abnormalItems = saveReview.abnormalItems || [];
     const unfinishedTasks = saveReview.unfinishedTasks || [];
-    if (!validateSaveNotes(abnormalItems, unfinishedTasks)) return;
+    if (!validateSaveNotes(abnormalItems, unfinishedTasks, saveReview.trackingIssues || [])) return;
     if (mode === 'updateDuplicate') {
       const targetId = saveReview.duplicateRecord?.fbId || saveReview.duplicateRecord?.id;
       executeSaveRecord({ targetRecordId: targetId, forceNew: false, review: saveReview });
@@ -932,18 +1103,23 @@ export default function App() {
                   <div className="divide-y divide-slate-100">
                     {cat.items.map(item => {
                       const total = getTotal(item);
+                      const expected = getExpected(item);
                       return (
                         <div key={item.id} className="p-2 text-xs flex justify-between items-center bg-white">
                           <div className="font-bold text-slate-800 whitespace-nowrap">{item.name} <span className="text-slate-400 font-normal">({item.standard})</span></div>
                           <div className="flex flex-wrap justify-end gap-x-2 gap-y-1 text-slate-600 font-medium text-[11px]">
                             {item.publicCount > 0 && <span className="text-blue-700">公:{item.publicCount}</span>}
+                            {item.drawerCount > 0 && <span className="text-blue-700">抽屜:{item.drawerCount}</span>}
+                            {item.crashCartCount > 0 && <span className="text-indigo-700">急救車:{item.crashCartCount}</span>}
+                            {item.inUseCount > 0 && <span className="text-emerald-700">使用中:{item.inUseCount}{item.inUseDestination ? ` ${item.inUseDestination}` : ''}</span>}
+                            {item.numberedMode && makeNumberedDevices(item).some(d => d.status !== 'unchecked') && <span className="text-indigo-700">{makeNumberedDevices(item).filter(d => d.status !== 'unchecked').map(d => `${d.label}:${statusLabel(d.status)}${d.destination ? `(${d.destination})` : ''}`).join('、')}</span>}
                             {(item.fullCount > 0 || item.emptyCount > 0) && <span className="text-cyan-700">(滿:{item.fullCount} 空:{item.emptyCount})</span>}
                             {item.beds?.length > 0 && <span className="text-indigo-700">床:{item.beds.join(',')}</span>}
                             {item.disinfectCount > 0 && <span className="text-emerald-600">消:{item.disinfectCount}</span>}
                             {item.repairCount > 0 && <span className="text-amber-600">修:{item.repairCount}</span>}
                             {item.missingCount > 0 && <span className="text-rose-600">少:{item.missingCount}</span>}
                             {total === 0 && <span className="text-slate-300">0</span>}
-                            {total !== item.standard && <span className="text-red-600 font-bold ml-1">不平({total})</span>}
+                            {total !== expected && <span className="text-red-600 font-bold ml-1">不平({total})</span>}
                           </div>
                         </div>
                       );
@@ -1292,8 +1468,9 @@ export default function App() {
               <div ref={itemListRef} className="space-y-4 animate-in fade-in duration-200 scroll-mt-56">
                 {currentCategoryObj?.items?.map(item => {
                   const total = getTotal(item);
-                  const isBalanced = total === item.standard;
-                  const diff = total - item.standard;
+                  const expected = getExpected(item);
+                  const isBalanced = total === expected;
+                  const diff = total - expected;
                   const currentBedInput = bedInputs[item.id] || '';
 
                   return (
@@ -1303,6 +1480,8 @@ export default function App() {
                           <h3 className="text-base font-bold text-slate-800 leading-tight">{item.name}</h3>
                           <div className="flex items-center gap-2 mt-1">
                             <span className="text-[11px] text-slate-500 font-medium bg-slate-100 px-2 py-0.5 rounded">標準: {item.standard}</span>
+                            {item.tempDelta ? <span className="text-[11px] text-amber-700 font-bold bg-amber-50 px-2 py-0.5 rounded border border-amber-100">臨時: {item.tempDelta > 0 ? `+${item.tempDelta}` : item.tempDelta}</span> : null}
+                            <span className="text-[11px] text-indigo-600 font-bold bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100">應點: {expected}</span>
                             <span className="text-[11px] text-indigo-600 font-bold bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100">實算: {total}</span>
                           </div>
                         </div>
@@ -1311,12 +1490,78 @@ export default function App() {
                         </div>
                       </div>
                       
-                      <div className="flex flex-wrap gap-1.5 w-full">
-                        <CounterBtn label="公庫" value={item.publicCount} icon={Package} theme="blue" onDec={() => updateCountByDelta(activeCategory, item.id, 'publicCount', -1)} onInc={() => updateCountByDelta(activeCategory, item.id, 'publicCount', 1)} />
-                        {!item.hideDisinfect && <CounterBtn label="消毒" value={item.disinfectCount} icon={ShieldPlus} theme="indigo" onDec={() => updateCountByDelta(activeCategory, item.id, 'disinfectCount', -1)} onInc={() => updateCountByDelta(activeCategory, item.id, 'disinfectCount', 1)} />}
-                        {!item.hideRepair && <CounterBtn label="維修" value={item.repairCount} icon={Wrench} theme="amber" onDec={() => updateCountByDelta(activeCategory, item.id, 'repairCount', -1)} onInc={() => updateCountByDelta(activeCategory, item.id, 'repairCount', 1)} />}
-                        <CounterBtn label="遺失" value={item.missingCount} icon={AlertOctagon} theme="rose" onDec={() => updateCountByDelta(activeCategory, item.id, 'missingCount', -1)} onInc={() => updateCountByDelta(activeCategory, item.id, 'missingCount', 1)} />
-                      </div>
+                      {item.numberedMode ? (
+                        <div className="bg-indigo-50 p-3 rounded-xl border border-indigo-100 space-y-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="text-xs font-black text-indigo-800 flex items-center gap-1"><Smartphone size={14}/> 編號點班</div>
+                            <button onClick={() => markAllDevicesInStock(activeCategory, item.id)} className="bg-white text-indigo-700 border border-indigo-100 px-2.5 py-1 rounded-lg text-[11px] font-bold active:scale-95">全部在庫</button>
+                          </div>
+                          <div className="space-y-2">
+                            {makeNumberedDevices(item).map(device => (
+                              <div key={device.no} className="bg-white border border-indigo-100 rounded-xl p-2 space-y-2">
+                                <div className="flex items-center gap-2">
+                                  <div className="w-14 text-xs font-black text-slate-700">{device.label}</div>
+                                  <select value={device.status} onChange={e => updateDevice(activeCategory, item.id, device.no, { status: e.target.value, destination: e.target.value === 'in_stock' || e.target.value === 'unchecked' ? '' : device.destination })} className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-bold outline-none">
+                                    {deviceStatusOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                                  </select>
+                                </div>
+                                {['in_use', 'repair', 'missing'].includes(device.status) && (
+                                  <div className="space-y-2">
+                                    <input type="text" value={device.destination || ''} onChange={e => updateDevice(activeCategory, item.id, device.no, { destination: e.target.value })} placeholder={device.status === 'in_use' ? '使用中去向：【王○○】護理師' : '去向／最後確認'} className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-200" />
+                                    <div className="flex overflow-x-auto gap-1.5 scrollbar-hide">
+                                      {unitStaff.map(staff => (
+                                        <button key={staff.name} type="button" onClick={() => updateDevice(activeCategory, item.id, device.no, { destination: destinationTextFromStaff(staff) })} className="shrink-0 bg-indigo-50 text-indigo-700 border border-indigo-100 px-2 py-1 rounded-full text-[11px] font-bold">{staff.name}</button>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : item.tabletMode ? (
+                        <div className="bg-indigo-50 p-3 rounded-xl border border-indigo-100 space-y-3">
+                          <div className="text-xs font-black text-indigo-800 flex items-center gap-1"><Tablet size={14}/> 位置點班</div>
+                          <div className="flex flex-wrap gap-1.5 w-full">
+                            <CounterBtn label="抽屜" value={item.drawerCount} icon={Package} theme="blue" onDec={() => updateCountByDelta(activeCategory, item.id, 'drawerCount', -1)} onInc={() => updateCountByDelta(activeCategory, item.id, 'drawerCount', 1)} />
+                            <CounterBtn label="急救車" value={item.crashCartCount} icon={ShieldPlus} theme="indigo" onDec={() => updateCountByDelta(activeCategory, item.id, 'crashCartCount', -1)} onInc={() => setItemField(activeCategory, item.id, 'crashCartCount', 1)} />
+                            <CounterBtn label="使用中" value={item.inUseCount} icon={User} theme="emerald" onDec={() => updateCountByDelta(activeCategory, item.id, 'inUseCount', -1)} onInc={() => updateCountByDelta(activeCategory, item.id, 'inUseCount', 1)} />
+                            <CounterBtn label="遺失" value={item.missingCount} icon={AlertOctagon} theme="rose" onDec={() => updateCountByDelta(activeCategory, item.id, 'missingCount', -1)} onInc={() => updateCountByDelta(activeCategory, item.id, 'missingCount', 1)} />
+                          </div>
+                          {(item.inUseCount || 0) > 0 && (
+                            <div className="space-y-2">
+                              <input type="text" value={item.inUseDestination || ''} onChange={e => setItemField(activeCategory, item.id, 'inUseDestination', e.target.value)} placeholder="使用中去向：【王○○】護理師" className="w-full bg-white border border-indigo-100 rounded-lg px-3 py-2 text-xs font-bold outline-none focus:ring-2 focus:ring-indigo-200" />
+                              <div className="flex overflow-x-auto gap-1.5 scrollbar-hide">
+                                {unitStaff.map(staff => <button key={staff.name} type="button" onClick={() => setItemField(activeCategory, item.id, 'inUseDestination', destinationTextFromStaff(staff))} className="shrink-0 bg-white text-indigo-700 border border-indigo-100 px-2 py-1 rounded-full text-[11px] font-bold">{staff.name}</button>)}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex flex-wrap gap-1.5 w-full">
+                            <CounterBtn label="公庫" value={item.publicCount} icon={Package} theme="blue" onDec={() => updateCountByDelta(activeCategory, item.id, 'publicCount', -1)} onInc={() => updateCountByDelta(activeCategory, item.id, 'publicCount', 1)} />
+                            {item.hasCrashCart && <CounterBtn label="急救車" value={item.crashCartCount} icon={ShieldPlus} theme="indigo" onDec={() => updateCountByDelta(activeCategory, item.id, 'crashCartCount', -1)} onInc={() => setItemField(activeCategory, item.id, 'crashCartCount', 1)} />}
+                            {!item.hideDisinfect && <CounterBtn label="消毒" value={item.disinfectCount} icon={ShieldPlus} theme="indigo" onDec={() => updateCountByDelta(activeCategory, item.id, 'disinfectCount', -1)} onInc={() => updateCountByDelta(activeCategory, item.id, 'disinfectCount', 1)} />}
+                            {!item.hideRepair && <CounterBtn label="維修" value={item.repairCount} icon={Wrench} theme="amber" onDec={() => updateCountByDelta(activeCategory, item.id, 'repairCount', -1)} onInc={() => updateCountByDelta(activeCategory, item.id, 'repairCount', 1)} />}
+                            <CounterBtn label="遺失" value={item.missingCount} icon={AlertOctagon} theme="rose" onDec={() => updateCountByDelta(activeCategory, item.id, 'missingCount', -1)} onInc={() => updateCountByDelta(activeCategory, item.id, 'missingCount', 1)} />
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <button onClick={() => setPublicToExpected(activeCategory, item.id)} className="bg-blue-50 text-blue-700 border border-blue-100 rounded-xl py-2 text-xs font-black active:scale-95">公庫設為應點</button>
+                            <input type="number" inputMode="numeric" value={item.publicCount || 0} onChange={e => setItemField(activeCategory, item.id, 'publicCount', Math.max(0, parseInt(e.target.value) || 0))} className="bg-white border border-slate-200 rounded-xl px-3 py-2 text-xs font-black text-center outline-none focus:ring-2 focus:ring-blue-200" />
+                          </div>
+                        </>
+                      )}
+
+                      {item.allowTempAdjust && (
+                        <div className="bg-amber-50 p-2.5 rounded-xl border border-amber-100 space-y-2">
+                          <div className="text-xs font-black text-amber-800">臨時增減量（例如 CSR 借入）</div>
+                          <div className="grid grid-cols-[90px_1fr] gap-2">
+                            <input type="number" value={item.tempDelta || 0} onChange={e => setItemField(activeCategory, item.id, 'tempDelta', parseInt(e.target.value) || 0)} className="bg-white border border-amber-100 rounded-lg px-2 py-1.5 text-xs font-black text-center outline-none" />
+                            <input type="text" value={item.tempNote || ''} onChange={e => setItemField(activeCategory, item.id, 'tempNote', e.target.value)} placeholder="原因：CSR 借入、暫借、待歸還..." className="bg-white border border-amber-100 rounded-lg px-2 py-1.5 text-xs font-bold outline-none" />
+                          </div>
+                        </div>
+                      )}
 
                       {item.hasFullEmpty && item.publicCount > 0 && (
                         <div className="bg-cyan-50 p-2.5 rounded-xl border border-cyan-100 flex flex-col gap-2">
@@ -1335,7 +1580,7 @@ export default function App() {
                         </div>
                       )}
                       
-                      <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
+                      {!item.noBeds && <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-100">
                         <div className="flex items-center gap-1.5 mb-2 text-xs font-bold text-slate-700">
                           <Bed size={14} className="text-indigo-500" /> 床位 ({item.beds?.length || 0})
                         </div>
@@ -1352,7 +1597,7 @@ export default function App() {
                           <input type="text" placeholder="輸入床號" value={currentBedInput} onChange={e => setBedInputs(prev => ({...prev, [item.id]: e.target.value}))} onKeyDown={e => { if(e.key==='Enter') { addBed(activeCategory, item.id, currentBedInput); setBedInputs(prev => ({...prev, [item.id]: ''})); } }} className="flex-1 bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs focus:ring-2 focus:ring-indigo-500 outline-none" />
                           <button onClick={() => { addBed(activeCategory, item.id, currentBedInput); setBedInputs(prev => ({...prev, [item.id]: ''})); }} disabled={!currentBedInput.trim()} className="bg-indigo-600 disabled:bg-indigo-300 text-white px-3 rounded-lg text-xs font-bold active:scale-95">加入</button>
                         </div>
-                      </div>
+                      </div>}
                     </div>
                   );
                 })}
@@ -1374,7 +1619,7 @@ export default function App() {
               <div className="flex justify-between items-start gap-3">
                 <div>
                   <h2 className="text-blue-800 font-bold flex items-center gap-2 text-sm"><History size={16}/> 歷史紀錄</h2>
-                  <p className="text-[10px] text-blue-600 mt-1">保存最新 100 筆紀錄，點選可產生圖檔報表。v11 月統計版</p>
+                  <p className="text-[10px] text-blue-600 mt-1">保存最新 100 筆紀錄，點選可產生圖檔報表。v13 快速點班與去向追蹤版</p>
                 </div>
                 <span className="bg-white text-blue-700 border border-blue-100 px-3 py-1 rounded-full text-xs font-black shrink-0">共 {filteredRecords.length} 筆</span>
               </div>
@@ -1483,7 +1728,7 @@ export default function App() {
               <div className="flex justify-between items-start gap-3">
                 <div>
                   <h2 className="text-violet-800 font-bold flex items-center gap-2 text-sm"><BarChart3 size={16}/> 月統計與異常排行榜</h2>
-                  <p className="text-[10px] text-violet-600 mt-1">依本機歷史紀錄統計，協助找出常見異常與追蹤重點。v11 月統計版</p>
+                  <p className="text-[10px] text-violet-600 mt-1">依本機歷史紀錄統計，協助找出常見異常與追蹤重點。v13 快速點班與去向追蹤版</p>
                 </div>
                 <button onClick={copyMonthlyStatsSummary} className="bg-white text-violet-700 border border-violet-100 px-3 py-1.5 rounded-full text-xs font-black shrink-0 flex items-center gap-1 active:scale-95">
                   <ClipboardList size={12}/> 複製
@@ -1625,6 +1870,30 @@ export default function App() {
                 <ImagePlus size={16}/> 上傳自己的照片
                 <input type="file" accept="image/*" className="hidden" onChange={e => handleAvatarFile(e.target.files?.[0], updateCurrentAvatar)} />
               </label>
+            </div>
+
+            <div className="bg-white border border-indigo-100 p-4 rounded-xl shadow-sm">
+              <h2 className="text-indigo-800 font-bold flex items-center gap-2 text-sm"><Users size={16}/> 單位人員名單</h2>
+              <p className="text-xs text-slate-500 mt-1">使用中去向可直接帶入，例如：使用中去向：【王○○】護理師。</p>
+              <div className="flex gap-2 mt-3">
+                <input type="text" value={staffDraftName} onChange={e => setStaffDraftName(e.target.value)} placeholder="新增姓名" className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-sm font-bold outline-none focus:ring-2 focus:ring-indigo-200" />
+                <select value={staffDraftRole} onChange={e => setStaffDraftRole(e.target.value)} className="w-28 bg-slate-50 border border-slate-200 rounded-xl px-2 py-2 text-xs font-bold outline-none">
+                  <option value="護理師">護理師</option>
+                  <option value="護理長">護理長</option>
+                  <option value="副護理長">副護理長</option>
+                  <option value="職務代理人">職務代理人</option>
+                  <option value="行政助理">行政助理</option>
+                </select>
+                <button onClick={addUnitStaff} className="bg-indigo-600 text-white px-3 rounded-xl text-xs font-black active:scale-95">新增</button>
+              </div>
+              <div className="flex flex-wrap gap-1.5 mt-3">
+                {unitStaff.map(staff => (
+                  <span key={staff.name} className="inline-flex items-center gap-1 bg-indigo-50 text-indigo-700 border border-indigo-100 px-2 py-1 rounded-full text-[11px] font-bold">
+                    {staff.name}<span className="text-indigo-400">{staff.role}</span>
+                    <button onClick={() => removeUnitStaff(staff.name)} className="text-indigo-300 hover:text-red-500"><X size={12}/></button>
+                  </span>
+                ))}
+              </div>
             </div>
 
             <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl">

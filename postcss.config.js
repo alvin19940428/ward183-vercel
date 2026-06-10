@@ -1,24 +1,6 @@
-{
-  "name": "ward183-inventory-check",
-  "version": "1.0.0",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "dev": "vite --host 0.0.0.0",
-    "build": "vite build",
-    "preview": "vite preview --host 0.0.0.0"
+export default {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {},
   },
-  "dependencies": {
-    "@vitejs/plugin-react": "latest",
-    "vite": "latest",
-    "react": "latest",
-    "react-dom": "latest",
-    "firebase": "latest",
-    "lucide-react": "latest"
-  },
-  "devDependencies": {
-    "tailwindcss": "^3.4.17",
-    "postcss": "^8.4.49",
-    "autoprefixer": "^10.4.20"
-  }
-}
+};
